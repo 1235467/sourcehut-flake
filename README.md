@@ -123,11 +123,14 @@ from the importing configuration's own nixpkgs.
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|
+| `enable` | bool | `true` | generate the virtual hosts described below; set to `false` to write them (or another reverse proxy) yourself |
 | `virtualHost` | nginx vhost options | `{}` | merged into the virtual hosts generated for `meta.<domain>` and `git.<domain>`, typed with the nginx virtual-host options from nixpkgs (so `enableACME`, `sslCertificate`, `locations`, ... are checked), e.g. to set `enableACME = false` or provide `sslCertificate`/`sslCertificateKey` |
 
-The module only contributes vhost rules (proxy to the web/API ports, `/static`,
-HTTP clone via fcgiwrap, recommended proxy headers per location). It does not
-enable or otherwise configure `services.nginx`; enable nginx yourself.
+With `enable` (the default) the module contributes vhost rules (proxy to the
+web/API ports, `/static`, HTTP clone via fcgiwrap, recommended proxy headers
+per location). It never enables or otherwise configures `services.nginx`;
+enable nginx yourself. The fcgiwrap socket (`/run/fcgiwrap-gitsrht.sock`) is
+available even with `enable = false`, for hand-written fastcgi locations.
 
 TLS is enabled by default in the generated vhosts (`forceSSL` and
 `enableACME`), so either set `security.acme.acceptTerms` and

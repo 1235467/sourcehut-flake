@@ -459,19 +459,31 @@ in
       };
     };
 
-    nginx.virtualHost = mkOption {
-      type = types.submodule nginxVhostOptions;
-      default = { };
-      description = ''
-        Configuration merged into the virtual hosts this module generates for
-        `meta.<domain>` and `git.<domain>`, typed with the nginx virtual host
-        options from nixpkgs (so `enableACME`, `sslCertificate`, `locations`,
-        ... can be set with checking and completion). The module only
-        contributes vhost rules; enabling and configuring nginx itself is
-        left to the user. TLS via ACME is enabled by default in the generated
-        vhosts, so {option}`security.acme.acceptTerms` and
-        {option}`security.acme.defaults.email` should be set.
-      '';
+    nginx = {
+      enable = mkEnableOption ''
+        automatic generation of nginx virtual hosts for the enabled services
+
+        The module only contributes vhost rules; enabling and configuring
+        nginx itself is left to the user. Disable this to write the virtual
+        hosts (or another reverse proxy) yourself; the fcgiwrap instance for
+        HTTP cloning at `/run/fcgiwrap-gitsrht.sock` stays available.
+      '' // {
+        default = true;
+      };
+
+      virtualHost = mkOption {
+        type = types.submodule nginxVhostOptions;
+        default = { };
+        description = ''
+          Configuration merged into the virtual hosts generated for
+          `meta.<domain>` and `git.<domain>`, typed with the nginx virtual
+          host options from nixpkgs (so `enableACME`, `sslCertificate`,
+          `locations`, ... can be set with checking and completion). TLS via
+          ACME is enabled by default in the generated vhosts, so
+          {option}`security.acme.acceptTerms` and
+          {option}`security.acme.defaults.email` should be set.
+        '';
+      };
     };
   };
 
@@ -809,7 +821,7 @@ in
       }
     ]))
 
-    (mkIf (cfg.meta.enable || cfg.git.enable) {
+    (mkIf (cfg.nginx.enable && (cfg.meta.enable || cfg.git.enable)) {
       services.nginx.virtualHosts = optionalAttrs (domain != null) {
         "meta.${domain}" = mkIf cfg.meta.enable (mkMerge [
           {
