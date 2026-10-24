@@ -84,19 +84,17 @@ let
 
   # Deep merge of the per-package asset trees. buildEnv would link only the
   # children of share/sourcehut, and the `static` child collides between
-  # core.sr.ht and the services, dropping static/<site>/ trees. Real files
-  # are copied (-L) so the assets do not depend on symlink chains into the
-  # package store paths.
+  # core.sr.ht and the services, dropping static/<site>/ trees.
   assets = pkgs.runCommand "sourcehut-assets" { } (
     ''
       mkdir -p $out/share/sourcehut
-      cp -rL --no-preserve=mode ${sourcehutPkgs.srht}/share/sourcehut/. $out/share/sourcehut/
+      cp -rs --no-preserve=mode ${sourcehutPkgs.srht}/share/sourcehut/. $out/share/sourcehut/
     ''
     + lib.optionalString cfg.meta.enable ''
-      cp -rL --no-preserve=mode ${sourcehutPkgs.metasrht}/share/sourcehut/. $out/share/sourcehut/
+      cp -rs --no-preserve=mode ${sourcehutPkgs.metasrht}/share/sourcehut/. $out/share/sourcehut/
     ''
     + lib.optionalString cfg.git.enable ''
-      cp -rL --no-preserve=mode ${sourcehutPkgs.gitsrht}/share/sourcehut/. $out/share/sourcehut/
+      cp -rs --no-preserve=mode ${sourcehutPkgs.gitsrht}/share/sourcehut/. $out/share/sourcehut/
     ''
   );
 
