@@ -63,7 +63,7 @@ let
     pathsToLink = [ "/share/sourcehut" ];
   };
 
-  redisUrl = "redis://127.0.0.1:${toString cfg.redis.port}";
+  redisUrl = "redis://${cfg.redis.host}:${toString cfg.redis.port}";
 
   sshCommand = "${sourcehutPkgs.sourcehut-ssh}/bin/sourcehut-ssh \"%u\" \"%h\" \"%t\" \"%k\"";
 
@@ -243,12 +243,38 @@ in
     postgresql.enable = mkEnableOption "local PostgreSQL integration";
 
     redis = {
-      enable = mkEnableOption "local Redis integration";
+      enable = mkEnableOption ''
+        local Redis integration, running a dedicated Redis server instance
+
+        Disable this to use any other Redis-compatible backend
+        (Valkey, DragonFly, a remote Redis, a Unix socket, ...).
+        In that case {option}`services.srht.settings.sr.ht.redis-host`
+        and {option}`services.srht.settings."meta.sr.ht".webhooks` must be
+        set to point at the backend, for example:
+
+        ```nix
+        services.srht.redis.enable = false;
+        services.srht.settings = {
+          "sr.ht".redis-host = "redis://127.0.0.1:6379";
+          "meta.sr.ht".webhooks = "redis://127.0.0.1:6379/1";
+        };
+        ```
+      '';
+
+      host = mkOption {
+        type = types.str;
+        default = "127.0.0.1";
+        description = ''
+          Host of the Redis-compatible backend. When
+          {option}`services.srht.redis.enable` is true, this is also the
+          address the dedicated Redis instance binds to.
+        '';
+      };
 
       port = mkOption {
         type = types.port;
         default = 6380;
-        description = "Port the local Redis instance listens on.";
+        description = "Port of the Redis-compatible backend.";
       };
     };
   };
@@ -260,6 +286,24 @@ in
           assertion = domain != null;
           message = ''
             services.srht.domain (or networking.domain) must be set.
+          '';
+        }
+        {
+          assertion = cfg.redis.enable || ((cfg.settings."sr.ht" or { }) ? redis-host);
+          message = ''
+            services.srht.redis.enable is disabled, so
+            services.srht.settings."sr.ht".redis-host must be set to point at
+            your Redis-compatible backend.
+          '';
+        }
+        {
+          assertion =
+            !cfg.meta.enable || cfg.redis.enable || ((cfg.settings."meta.sr.ht" or { }) ? webhooks);
+          message = ''
+            services.srht.redis.enable is disabled, so
+            services.srht.settings."meta.sr.ht".webhooks must be set to a
+            broker URL on your Redis-compatible backend for the
+            meta.sr.ht webhook worker.
           '';
         }
         {
@@ -306,7 +350,7 @@ in
     (mkIf cfg.redis.enable {
       services.redis.servers.sourcehut = {
         enable = true;
-        bind = "127.0.0.1";
+        bind = cfg.redis.host;
         port = cfg.redis.port;
         save = [
           [
