@@ -5,6 +5,11 @@ services. NixOS removed `services.sourcehut` (and the `sourcehut.*` packages) in
 25.11 because the packaged versions were unmaintained; this flake builds the
 current upstream tags from source instead.
 
+The steps you have to prepare outside of the NixOS configuration (DNS,
+PostgreSQL, a Redis-compatible backend, secret keys, accounts, mail, SSH
+prerequisites) are documented in [PREPARATION.md](PREPARATION.md), based on
+the upstream installation guides.
+
 Currently covered services (the only ones this flake packages):
 
 | Component | Version | Purpose |
