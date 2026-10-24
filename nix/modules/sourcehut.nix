@@ -177,30 +177,6 @@ in
                 description = "Values other than `production` add a banner to each page.";
                 example = "production";
               };
-              site-name = mkIniOption {
-                description = "Name of your network of sr.ht-based sites.";
-                example = "sourcehut";
-              };
-              site-info = mkIniOption {
-                description = "The top-level info page for your site.";
-                example = "https://sourcehut.org";
-              };
-              site-blurb = mkIniOption {
-                description = "Short description used by templates.";
-                example = "the hacker's forge";
-              };
-              source-url = mkIniOption {
-                description = "The source code for your fork of sr.ht.";
-                example = "https://git.sr.ht/~sircmpwn/srht";
-              };
-              owner-name = mkIniOption {
-                description = "Name of the instance owner, used in audit logs and templates.";
-                example = "Jane Doe";
-              };
-              owner-email = mkIniOption {
-                description = "Contact address of the instance owner.";
-                example = "admin@example.com";
-              };
               service-key = mkIniOption {
                 description = "Key encrypting session cookies. Generate with `sr.ht-keygen service`. Required.";
               };
@@ -618,19 +594,8 @@ in
             environment = mkDefault "production";
             global-domain = mkDefault domain;
             assets = mkDefault "${assets}";
-            # Read at import time (or template render time) without defaults
-            # by core/metasrht/gitsrht; provide presentational defaults that
-            # users are expected to override.
-            site-name = mkDefault "sourcehut";
-            site-info = mkDefault "https://sourcehut.org";
-            site-blurb = mkDefault "the hacker's forge";
-            source-url = mkDefault "https://git.sr.ht/~sircmpwn/srht";
-            owner-name = mkDefault "SourceHut administrator";
           };
         }
-        (mkIf (domain != null) {
-          "sr.ht".owner-email = mkDefault "contact@${domain}";
-        })
         (mkIf cfg.meta.enable {
           "meta.sr.ht".api-internal-origin = mkDefault "http://127.0.0.1:${toString cfg.meta.apiPort}";
         })

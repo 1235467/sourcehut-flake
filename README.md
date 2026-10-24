@@ -163,8 +163,6 @@ not exist on NixOS.
 | `"sr.ht".global-domain` | `services.srht.domain` |
 | `"sr.ht".environment` | `production` |
 | `"sr.ht".assets` | combined asset directory (SCSS, static files, SQL schema, migrations) |
-| `"sr.ht".{site-name,site-info,site-blurb,source-url,owner-name}` | presentational defaults (`sourcehut`, `https://sourcehut.org`, ...); expected to be overridden |
-| `"sr.ht".owner-email` | `contact@<domain>` |
 | `"meta.sr.ht".origin` / `"git.sr.ht".origin` | `https://meta.<domain>` / `https://git.<domain>` |
 | `"meta.sr.ht".api-internal-origin` / `"git.sr.ht".api-internal-origin` | `http://127.0.0.1:<apiPort>`; used by frontends and the SSH dispatcher for internal GraphQL calls (external clients keep using `origin`) |
 | `"meta.sr.ht".migrate-on-upgrade`, `"git.sr.ht".migrate-on-upgrade` | `yes` (runs `sourcehut-migrate <service> -a` on boot) |
