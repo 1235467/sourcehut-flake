@@ -848,6 +848,9 @@ in
 
         systemd.tmpfiles.rules = [
           "d ${cfg.git.repos} 0755 ${cfg.git.user} ${cfg.git.group} -"
+          "d /var/log/git.sr.ht 0755 ${cfg.git.user} ${cfg.git.group} -"
+          "f /var/log/git.sr.ht/git.sr.ht-shell.log 0644 ${cfg.git.user} ${cfg.git.group} -"
+          "f /var/log/git.sr.ht/git.sr.ht-update-hook.log 0644 ${cfg.git.user} ${cfg.git.group} -"
         ];
 
         services.srht.settings = {
@@ -959,6 +962,10 @@ in
           socket.group = "nginx";
           socket.mode = "0660";
         };
+
+        # git.sr.ht-http-clone execs `git http-backend` via exec.LookPath;
+        # the fcgiwrap unit's default PATH does not contain git.
+        systemd.services."fcgiwrap-gitsrht".path = [ cfg.git.gitPackage ];
       }
     ]))
 
