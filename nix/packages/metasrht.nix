@@ -15,6 +15,7 @@
   dnspython,
   gqlgen,
   httpx,
+  iso3166,
   prometheus-client,
   pydantic,
   qrcode,
@@ -53,6 +54,7 @@ let
       bcrypt
       dnspython
       httpx
+      iso3166
       prometheus-client
       pydantic
       qrcode
@@ -81,6 +83,19 @@ let
     '';
 
     pythonImportsCheck = [ "metasrht" ];
+    # Import the generated GraphQL client too: srht.crypto reads its keys
+    # at import time (hence the throwaway config.ini) and the client pulls
+    # in runtime dependencies which nothing else would validate at build
+    # time (e.g. iso3166 for metasrht).
+    checkPhase = ''
+      runHook preCheck
+      printf '[sr.ht]\nnetwork-key=%s\n[webhooks]\nprivate-key=%s\n' \
+        "$(python -c 'import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())')" \
+        "$(python -c 'import base64, os; print(base64.b64encode(os.urandom(32)).decode())')" > config.ini
+      python -c 'import metasrht, metasrht.graphql'
+      runHook postCheck
+    '';
+
 
     meta = {
       description = "meta.sr.ht website";
