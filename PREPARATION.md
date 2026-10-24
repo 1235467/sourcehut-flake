@@ -220,6 +220,11 @@ If another module already owns `AuthorizedKeysCommand`, set
   be restored)
 - object storage buckets, if used
 
+The Redis-compatible backend does **not** need to be backed up: it only holds
+caches, the webhook-signature nonce store and the Celery webhook queue. Losing
+it costs a re-login and possibly some in-flight webhook deliveries, nothing
+permanent.
+
 ## Upstream references
 
 - <https://man.sr.ht/installation.md> — general installation and prerequisites
