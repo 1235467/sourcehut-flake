@@ -82,15 +82,21 @@ let
     ++ optional cfg.meta.enable ps.celery
   );
 
-  assets = pkgs.buildEnv {
-    name = "sourcehut-assets";
-    paths = [
-      sourcehutPkgs.srht
-    ]
-    ++ optional cfg.meta.enable sourcehutPkgs.metasrht
-    ++ optional cfg.git.enable sourcehutPkgs.gitsrht;
-    pathsToLink = [ "/share/sourcehut" ];
-  };
+  # Deep merge of the per-package asset trees. buildEnv would link only the
+  # children of share/sourcehut, and the `static` child collides between
+  # core.sr.ht and the services, dropping static/<site>/ trees.
+  assets = pkgs.runCommand "sourcehut-assets" { } (
+    ''
+      mkdir -p $out/share/sourcehut
+      cp -rs --no-preserve=mode ${sourcehutPkgs.srht}/share/sourcehut/. $out/share/sourcehut/
+    ''
+    + lib.optionalString cfg.meta.enable ''
+      cp -rs --no-preserve=mode ${sourcehutPkgs.metasrht}/share/sourcehut/. $out/share/sourcehut/
+    ''
+    + lib.optionalString cfg.git.enable ''
+      cp -rs --no-preserve=mode ${sourcehutPkgs.gitsrht}/share/sourcehut/. $out/share/sourcehut/
+    ''
+  );
 
   sshCommand = "${sourcehutPkgs.sourcehut-ssh}/bin/sourcehut-ssh \"%u\" \"%h\" \"%t\" \"%k\"";
 
