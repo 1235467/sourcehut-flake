@@ -138,6 +138,13 @@ format is the upstream `config.example.ini`; see the
 and [meta.sr.ht](https://git.sr.ht/~sircmpwn/meta.sr.ht/tree/master/item/config.example.ini)
 examples).
 
+All keys below and everything you put in `services.srht.settings` are the
+upstream `config.ini` keys verbatim; the module invents no new keys. The only
+one not shown in the example files is `[sr.ht] assets`, which upstream code
+(`srht/config.py`, `sourcehut-migrate`) reads with `/usr/share/sourcehut` as
+its default; it is set to the combined asset directory because that path does
+not exist on NixOS.
+
 ### Set automatically (override with `mkForce` or plain assignment)
 
 | Key | Value |
