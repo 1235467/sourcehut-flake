@@ -121,8 +121,9 @@ in
 
         Infrastructure such as the Redis-compatible backend is not managed by
         this module: {option}`services.srht.settings.sr.ht.redis-host` (and
-        {option}`services.srht.settings."meta.sr.ht".webhooks` for meta.sr.ht)
-        must be configured to point at your own instance.
+        {option}`services.srht.settings."meta.sr.ht".webhooks`, the Celery
+        broker URL for the webhook worker, e.g. `redis://127.0.0.1:6379/1`
+        for meta.sr.ht) must be configured to point at your own instance.
       '';
     };
 
@@ -264,9 +265,9 @@ in
         {
           assertion = !cfg.meta.enable || (cfg.settings."meta.sr.ht" or { }) ? webhooks;
           message = ''
-            services.srht.settings."meta.sr.ht".webhooks must be set to a
-            broker URL on your Redis-compatible backend for the meta.sr.ht
-            webhook worker.
+            services.srht.settings."meta.sr.ht".webhooks must be set to the
+            Celery broker URL used by the meta.sr.ht webhook delivery worker,
+            for example "redis://127.0.0.1:6379/1".
           '';
         }
         {
