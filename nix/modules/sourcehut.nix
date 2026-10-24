@@ -263,6 +263,22 @@ in
             default = { };
           };
 
+          "meta.sr.ht::billing" = mkOption {
+            type = mkIniSection {
+              enabled = mkIniOption {
+                description = "Whether the Stripe billing system is enabled. Read at startup by metasrht and must be present. Required.";
+                example = "no";
+              };
+              stripe-public-key = mkIniOption {
+                description = "Stripe public key (only used when enabled = \"yes\").";
+              };
+              stripe-secret-key = mkIniOption {
+                description = "Path to the Stripe secret key (only used when enabled = \"yes\").";
+              };
+            };
+            default = { };
+          };
+
           "meta.sr.ht::settings" = mkOption {
             type = mkIniSection {
               registration = mkIniOption {
@@ -343,7 +359,7 @@ in
               smtp-user = mkIniOption { description = "Outgoing SMTP user."; };
               smtp-password = mkIniOption { description = "Outgoing SMTP password."; };
               smtp-from = mkIniOption {
-                description = "Sender address of outgoing mail.";
+                description = "Sender address of outgoing mail. The Go APIs require this key to be present and a valid mail address even when no SMTP host is configured. Required.";
                 example = "noreply@example.com";
               };
               smtp-encryption = mkIniOption {
@@ -585,6 +601,22 @@ in
           message = ''
             services.srht.settings."sr.ht".owner-email must be set
             (read at import time by metasrht, no default).
+          '';
+        }
+        {
+          assertion = cfg.settings."mail".smtp-from != null;
+          message = ''
+            services.srht.settings."mail".smtp-from must be set to a valid
+            mail address (e.g. "noreply@example.com"); the Go APIs require
+            the key even when no SMTP host is configured.
+          '';
+        }
+        {
+          assertion = !cfg.meta.enable || cfg.settings."meta.sr.ht::billing".enabled != null;
+          message = ''
+            services.srht.settings."meta.sr.ht::billing".enabled must be set
+            (use "no" to disable billing); it is read at startup by
+            metasrht.
           '';
         }
         {
