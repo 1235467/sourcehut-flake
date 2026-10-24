@@ -116,7 +116,12 @@ let
     ''
   );
 
-  sshCommand = "${sourcehutPkgs.sourcehut-ssh}/bin/sourcehut-ssh \"%u\" \"%h\" \"%t\" \"%k\"";
+  # OpenSSH's safe_path rejects AuthorizedKeysCommand paths below
+  # group-writable directories; /nix/store (mode 1775) is rejected, so the
+  # dispatcher is invoked through a root-owned 0755 wrapper in /etc (which
+  # environment.etc materializes as a real file because of `mode`).
+  sshdDispatchWrapper = "/etc/ssh/sourcehut/sourcehut-ssh";
+  sshCommand = "${sshdDispatchWrapper} \"%u\" \"%h\" \"%t\" \"%k\"";
 
   configFile = config.environment.etc."sr.ht/config.ini".source;
 
@@ -855,6 +860,14 @@ in
           authorizedKeysCommand = mkDefault sshCommand;
           authorizedKeysCommandUser = mkDefault "root";
           settings.PermitUserEnvironment = mkDefault "SRHT_*";
+        };
+
+        environment.etc."ssh/sourcehut/sourcehut-ssh" = mkIf cfg.git.manageSshd {
+          mode = "0755";
+          text = ''
+            #!/bin/sh
+            exec ${sourcehutPkgs.sourcehut-ssh}/bin/sourcehut-ssh "$@"
+          '';
         };
 
         systemd.services."sourcehut-migrate-git" = {
