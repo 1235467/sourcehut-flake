@@ -1,6 +1,7 @@
 {
   config,
   lib,
+  options,
   pkgs,
   ...
 }:
@@ -61,8 +62,16 @@ let
   };
 
   # Typed with the nixpkgs nginx virtual-host options, so users get option
-  # checking and completion for the configuration merged into our vhosts.
+  # checking and completion.
   nginxVhostOptions = import (pkgs.path + "/nixos/modules/services/web-servers/nginx/vhost-options.nix");
+
+  # The *raw* user definitions (lib/modules.nix exposes definitions as their
+  # assigned values). They are imported into the generated vhosts as
+  # modules: merging the evaluated option value instead would materialize
+  # unset options as their submodule defaults (forceSSL=false,
+  # enableACME=false, ...) at regular priority, silently overriding the
+  # mkDefault values below.
+  nginxVhostUserConfig = options.services.srht.nginx.virtualHost.definitions;
 
   # Declared settings options default to null; drop them (and sections that
   # end up empty) before rendering so the generated ini only contains keys
@@ -85,16 +94,25 @@ let
   # Deep merge of the per-package asset trees. buildEnv would link only the
   # children of share/sourcehut, and the `static` child collides between
   # core.sr.ht and the services, dropping static/<site>/ trees.
+  # Merged asset directory with the same layout as upstream's
+  # /usr/share/sourcehut: $out/{static,scss,migrations,<service>.sql,...}.
+  # Both `sr.ht::assets` and the nginx `/static` root point at $out directly.
   assets = pkgs.runCommand "sourcehut-assets" { } (
     ''
-      mkdir -p $out/share/sourcehut
-      cp -rs --no-preserve=mode ${sourcehutPkgs.srht}/share/sourcehut/. $out/share/sourcehut/
+      cp -rs --no-preserve=mode ${sourcehutPkgs.srht}/share/sourcehut/. $out/
     ''
     + lib.optionalString cfg.meta.enable ''
-      cp -rs --no-preserve=mode ${sourcehutPkgs.metasrht}/share/sourcehut/. $out/share/sourcehut/
+      cp -rs --no-preserve=mode ${sourcehutPkgs.metasrht}/share/sourcehut/. $out/
     ''
     + lib.optionalString cfg.git.enable ''
-      cp -rs --no-preserve=mode ${sourcehutPkgs.gitsrht}/share/sourcehut/. $out/share/sourcehut/
+      cp -rs --no-preserve=mode ${sourcehutPkgs.gitsrht}/share/sourcehut/. $out/
+    ''
+    + ''
+      printf 'core.sr.ht %s\ngit.sr.ht %s\nmeta.sr.ht %s\n' \
+        "${sourcehutPkgs.srht.version}" \
+        "${sourcehutPkgs.gitsrht.python.version}" \
+        "${sourcehutPkgs.metasrht.python.version}" \
+        > $out/versions
     ''
   );
 
@@ -828,67 +846,68 @@ in
     ]))
 
     (mkIf (cfg.nginx.enable && (cfg.meta.enable || cfg.git.enable)) {
-      services.nginx.virtualHosts = optionalAttrs (domain != null) {
-        "meta.${domain}" = mkIf cfg.meta.enable (mkMerge [
-          {
-            forceSSL = mkDefault true;
+      services.nginx.virtualHosts = optionalAttrs (domain != null) (
+        optionalAttrs cfg.meta.enable {
+          "meta.${domain}" = mkMerge ([
+            {
+              forceSSL = mkDefault true;
             enableACME = mkDefault true;
-            locations."/" = {
-              proxyPass = mkDefault "http://${cfg.listenAddress}:${toString cfg.meta.port}";
-              recommendedProxySettings = mkDefault true;
-            };
-            locations."/query" = {
-              proxyPass = mkDefault "http://${cfg.listenAddress}:${toString cfg.meta.apiPort}";
-              recommendedProxySettings = mkDefault true;
-            };
-            locations."/static" = {
-              root = "${assets}";
-              extraConfig = ''
-                expires 30d;
-              '';
-            };
-          }
-          cfg.nginx.virtualHost
-        ]);
-
-        "git.${domain}" = mkIf cfg.git.enable (mkMerge [
-          {
-            forceSSL = mkDefault true;
+              locations."/" = {
+                proxyPass = mkDefault "http://${cfg.listenAddress}:${toString cfg.meta.port}";
+                recommendedProxySettings = mkDefault true;
+              };
+              locations."/query" = {
+                proxyPass = mkDefault "http://${cfg.listenAddress}:${toString cfg.meta.apiPort}";
+                recommendedProxySettings = mkDefault true;
+              };
+              locations."/static" = {
+                root = mkDefault "${assets}";
+                extraConfig = ''
+                  expires 30d;
+                '';
+              };
+            }
+          ] ++ nginxVhostUserConfig);
+        }
+        // optionalAttrs cfg.git.enable {
+          "git.${domain}" = mkMerge ([
+            {
+              forceSSL = mkDefault true;
             enableACME = mkDefault true;
-            extraConfig = ''
-              client_max_body_size 100m;
-            '';
-            locations."/" = {
-              proxyPass = mkDefault "http://${cfg.listenAddress}:${toString cfg.git.port}";
-              recommendedProxySettings = mkDefault true;
-            };
-            locations."/query" = {
-              proxyPass = mkDefault "http://${cfg.listenAddress}:${toString cfg.git.apiPort}";
-              recommendedProxySettings = mkDefault true;
-            };
-            locations."/static" = {
-              root = "${assets}";
               extraConfig = ''
-                expires 30d;
+                client_max_body_size 100m;
               '';
-            };
-            locations."~ ^/([^/]+)/([^/]+)/(HEAD|info/refs|objects/info/.*|git-upload-pack|git-upload-archive).*$" = {
-              extraConfig = ''
-                fastcgi_pass unix:/run/fcgiwrap-gitsrht.sock;
-                fastcgi_param SCRIPT_FILENAME ${cfg.git.package}/bin/git.sr.ht-http-clone;
-                fastcgi_param PATH_INFO $uri;
-                fastcgi_param GIT_PROJECT_ROOT ${cfg.git.repos};
-                fastcgi_param GIT_HTTP_EXPORT_ALL "";
-                fastcgi_read_timeout 500s;
-                fastcgi_max_temp_file_size 512m;
-                include ${pkgs.nginx}/conf/fastcgi_params;
-                gzip off;
-              '';
-            };
-          }
-          cfg.nginx.virtualHost
-        ]);
-      };
+              locations."/" = {
+                proxyPass = mkDefault "http://${cfg.listenAddress}:${toString cfg.git.port}";
+                recommendedProxySettings = mkDefault true;
+              };
+              locations."/query" = {
+                proxyPass = mkDefault "http://${cfg.listenAddress}:${toString cfg.git.apiPort}";
+                recommendedProxySettings = mkDefault true;
+              };
+              locations."/static" = {
+                root = mkDefault "${assets}";
+                extraConfig = ''
+                  expires 30d;
+                '';
+              };
+              locations."~ ^/([^/]+)/([^/]+)/(HEAD|info/refs|objects/info/.*|git-upload-pack|git-upload-archive).*$" = {
+                extraConfig = ''
+                  fastcgi_pass unix:/run/fcgiwrap-gitsrht.sock;
+                  fastcgi_param SCRIPT_FILENAME ${cfg.git.package}/bin/git.sr.ht-http-clone;
+                  fastcgi_param PATH_INFO $uri;
+                  fastcgi_param GIT_PROJECT_ROOT ${cfg.git.repos};
+                  fastcgi_param GIT_HTTP_EXPORT_ALL "";
+                  fastcgi_read_timeout 500s;
+                  fastcgi_max_temp_file_size 512m;
+                  include ${pkgs.nginx}/conf/fastcgi_params;
+                  gzip off;
+                '';
+              };
+            }
+          ] ++ nginxVhostUserConfig);
+        }
+      );
     })
   ]);
 }
