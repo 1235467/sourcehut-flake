@@ -32,14 +32,15 @@ with modern Go), `dataloaden` 0.3.0.
         sourcehut.nixosModules.default
         {
           networking.domain = "example.com";
-          security.acme.defaults.email = "admin@example.com"; # for the default TLS setup
+
+          services.nginx.enable = true;            # nginx is user-managed
+          security.acme.acceptTerms = true;        # for the default TLS setup
+          security.acme.defaults.email = "admin@example.com";
 
           services.srht = {
             enable = true;
             git.enable = true;
             meta.enable = true;
-            nginx.enable = true;
-            postgresql.enable = true;
 
             settings = {
               "sr.ht" = {
@@ -48,6 +49,8 @@ with modern Go), `dataloaden` 0.3.0.
                 redis-host = "redis://127.0.0.1:6379";
               };
               "webhooks".private-key = "…";  # sr.ht-keygen webhook
+              "meta.sr.ht".connection-string = "postgresql://meta:pw@127.0.0.1/meta.sr.ht";
+              "git.sr.ht".connection-string = "postgresql://git:pw@127.0.0.1/git.sr.ht";
               "meta.sr.ht".webhooks = "redis://127.0.0.1:6379/1";
             };
           };
@@ -115,22 +118,17 @@ from the importing configuration's own nixpkgs.
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|
-| `enable` | bool | `false` | install nginx virtual hosts for `meta.<domain>` and `git.<domain>` (proxy to the web/API ports, `/static`, HTTP clone via fcgiwrap) |
-| `virtualHost` | attrs | `{}` | merged into both virtual hosts, e.g. to set `enableACME = false` or provide `sslCertificate`/`sslCertificateKey` |
+| `virtualHost` | attrs | `{}` | merged into the virtual hosts generated for `meta.<domain>` and `git.<domain>`, e.g. to set `enableACME = false` or provide `sslCertificate`/`sslCertificateKey` |
 
-TLS is enabled by default (`forceSSL` and `enableACME`), so either set
-`security.acme.defaults.email` or override `services.srht.nginx.virtualHost`.
-HTTP cloning additionally requires the internal fcgiwrap instance, which the
-module configures automatically.
+The module only contributes vhost rules (proxy to the web/API ports, `/static`,
+HTTP clone via fcgiwrap, recommended proxy headers per location). It does not
+enable or otherwise configure `services.nginx`; enable nginx yourself.
 
-### `services.srht.postgresql.*`
-
-| Option | Type | Default | Meaning |
-|---|---|---|---|
-| `postgresql.enable` | bool | `false` | create the `meta.sr.ht` / `git.sr.ht` databases and roles (`ensureDatabases` / `ensureUsers`) and grant ownership. Authentication and socket settings are left untouched; the default `local all all peer` rule is used, so the services run with matching Unix users |
-
-If you manage databases yourself, leave it disabled and provide
-`settings."meta.sr.ht".connection-string` / `settings."git.sr.ht".connection-string`.
+TLS is enabled by default in the generated vhosts (`forceSSL` and
+`enableACME`), so either set `security.acme.acceptTerms` and
+`security.acme.defaults.email`, or override the vhosts via
+`services.srht.nginx.virtualHost`. HTTP cloning additionally requires the
+internal fcgiwrap instance, which the module configures automatically.
 
 ## Settings reference
 
@@ -149,7 +147,6 @@ examples).
 | `"sr.ht".assets` | combined asset directory (SCSS, static files, SQL schema, migrations) |
 | `"meta.sr.ht".origin` / `"git.sr.ht".origin` | `https://meta.<domain>` / `https://git.<domain>` |
 | `"meta.sr.ht".migrate-on-upgrade`, `"git.sr.ht".migrate-on-upgrade` | `yes` (runs `sourcehut-migrate <service> -a` on boot) |
-| `"meta.sr.ht".connection-string`, `"git.sr.ht".connection-string` | local Unix-socket PostgreSQL URL for the service user |
 | `"git.sr.ht".repos`, `"git.sr.ht".post-update-script`, `"git.sr.ht".shell`, `"git.sr.ht".enable-dispatch` | derived from the options above (SSH dispatch, repo path, update hook) |
 | `"git.sr.ht".outgoing-domain`, `"meta.sr.ht::settings".onboarding-redirect` | https URLs under the instance domain |
 
@@ -160,6 +157,7 @@ examples).
 | `"sr.ht".service-key` | key encrypting session cookies, shared by all services on the host | `sr.ht-keygen service` (from the `srht` package, also in `nix shell .#srht`) |
 | `"sr.ht".network-key` | key encrypting internal messages/service-to-service auth; must be identical across all services | `sr.ht-keygen network` |
 | `"webhooks".private-key` | base64 Ed25519 key signing webhook payloads | `sr.ht-keygen webhook` |
+| `"meta.sr.ht".connection-string` / `"git.sr.ht".connection-string` | PostgreSQL connection URL **including credentials**, e.g. `postgresql://meta:password@127.0.0.1/meta.sr.ht`. Databases and roles are not created by the module | your infrastructure |
 | `"sr.ht".redis-host` | Redis-compatible URL for caching/sessions, e.g. `redis://127.0.0.1:6379` (Redis, Valkey, DragonFly, `rediss://`, `unix://`, sentinel lists) | your infrastructure |
 | `"meta.sr.ht".webhooks` | **Celery broker URL** for the meta.sr.ht webhook delivery worker (queue for outgoing webhook events), e.g. `redis://127.0.0.1:6379/1`. Required when `meta.enable` | your infrastructure |
 
@@ -210,16 +208,18 @@ files; the first boot initializes from the packaged `schema.sql`.
 
 The module is written to sit next to an existing nginx/PostgreSQL/sshd setup:
 
-- shared options (`services.nginx.*`, `services.postgresql.*`,
-  `services.openssh.*`, user definitions) are only set with `mkDefault`, so
-  your own definitions win
-- nginx virtual hosts and their `proxyPass` are `mkDefault` too; existing
+- user-visible shared options (`services.openssh.*`, user definitions) are
+  only set with `mkDefault`, and `services.postgresql.*` / `services.redis.*`
+  are never configured at all, so your own definitions win
+- nginx is never enabled or reconfigured beyond the generated virtual hosts;
+  the vhost locations and their `proxyPass` are `mkDefault` too, so existing
   definitions for the same hostnames take precedence
 - multiple `AuthorizedKeysCommand` users: the module fails with an actionable
   assertion instead of silently breaking git over SSH; set
   `services.srht.git.manageSshd = false` to step aside
-- Redis and object storage are never touched; PostgreSQL databases are only
-  created if `postgresql.enable` is on
+- PostgreSQL and Redis are never configured by this module: you provide the
+  connection URLs, it only orders its units after `postgresql.target` when
+  the nixpkgs PostgreSQL module is enabled
 
 ## Updating the packaged versions
 

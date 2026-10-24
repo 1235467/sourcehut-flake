@@ -16,7 +16,6 @@ let
     mkPackageOption
     optional
     optionalAttrs
-    optionalString
     types
     ;
 
@@ -96,7 +95,7 @@ let
         "network.target"
         "sourcehut-migrate-${service}.service"
       ]
-      ++ optional cfg.postgresql.enable "postgresql.target";
+      ++ optional config.services.postgresql.enable "postgresql.target";
       restartTriggers = [ configFile ];
     }
     // extra
@@ -119,11 +118,14 @@ in
         verbatim, for example {option}`services.srht.settings.sr.ht.service-key`
         or {option}`services.srht.settings."meta.sr.ht".connection-string`.
 
-        Infrastructure such as the Redis-compatible backend is not managed by
-        this module: {option}`services.srht.settings.sr.ht.redis-host` (and
-        {option}`services.srht.settings."meta.sr.ht".webhooks`, the Celery
-        broker URL for the webhook worker, e.g. `redis://127.0.0.1:6379/1`
-        for meta.sr.ht) must be configured to point at your own instance.
+        Infrastructure such as PostgreSQL and the Redis-compatible backend
+        is not managed by this module:
+        {option}`services.srht.settings."meta.sr.ht".connection-string`,
+        {option}`services.srht.settings."git.sr.ht".connection-string`,
+        {option}`services.srht.settings.sr.ht.redis-host` and
+        {option}`services.srht.settings."meta.sr.ht".webhooks` (the Celery
+        broker URL for the webhook worker, e.g. `redis://127.0.0.1:6379/1`)
+        must be configured to point at your own instances.
       '';
     };
 
@@ -228,22 +230,18 @@ in
       };
     };
 
-    nginx = {
-      enable = mkEnableOption "local nginx integration";
-
-      virtualHost = mkOption {
-        type = types.attrs;
-        default = { };
-        description = ''
-          Virtual host configuration merged with all of SourceHut's virtual
-          hosts, for instance to set `enableACME` or TLS certificates.
-          TLS via ACME is enabled by default, so
-          {option}`security.acme.defaults.email` should be set.
-        '';
-      };
+    nginx.virtualHost = mkOption {
+      type = types.attrs;
+      default = { };
+      description = ''
+        Virtual host configuration merged into the virtual hosts this module
+        generates for `meta.<domain>` and `git.<domain>`, for instance to set
+        `enableACME` or TLS certificates. The module only contributes vhost
+        rules; enabling and configuring nginx itself is left to the user.
+        TLS via ACME is enabled by default, so
+        {option}`security.acme.defaults.email` should be set.
+      '';
     };
-
-    postgresql.enable = mkEnableOption "local PostgreSQL integration";
   };
 
   config = mkIf cfg.enable (mkMerge [
@@ -253,6 +251,24 @@ in
           assertion = domain != null;
           message = ''
             services.srht.domain (or networking.domain) must be set.
+          '';
+        }
+        {
+          assertion = !cfg.meta.enable || (cfg.settings."meta.sr.ht" or { }) ? connection-string;
+          message = ''
+            services.srht.settings."meta.sr.ht".connection-string must be set
+            to the PostgreSQL connection URL of the meta.sr.ht database,
+            including credentials, for example
+            "postgresql://meta:password@127.0.0.1/meta.sr.ht".
+          '';
+        }
+        {
+          assertion = !cfg.git.enable || (cfg.settings."git.sr.ht" or { }) ? connection-string;
+          message = ''
+            services.srht.settings."git.sr.ht".connection-string must be set
+            to the PostgreSQL connection URL of the git.sr.ht database,
+            including credentials, for example
+            "postgresql://git:password@127.0.0.1/git.sr.ht".
           '';
         }
         {
@@ -308,33 +324,6 @@ in
       ];
     }
 
-    (mkIf cfg.postgresql.enable {
-      services.postgresql.enable = mkDefault true;
-
-      services.postgresql.ensureDatabases =
-        optional cfg.meta.enable "meta.sr.ht" ++ optional cfg.git.enable "git.sr.ht";
-
-      services.postgresql.ensureUsers =
-        optional cfg.meta.enable {
-          name = cfg.meta.user;
-          ensureDBOwnership = false;
-        }
-        ++ optional cfg.git.enable {
-          name = cfg.git.user;
-          ensureDBOwnership = false;
-        };
-
-      # Database names contain dots, so ownership cannot be assigned through
-      # ensureDBOwnership and has to be handled explicitly.
-      systemd.services.postgresql-setup.postStart =
-        optionalString cfg.meta.enable ''
-          psql -tAc 'ALTER DATABASE "meta.sr.ht" OWNER TO "${cfg.meta.user}";'
-        ''
-        + optionalString cfg.git.enable ''
-          psql -tAc 'ALTER DATABASE "git.sr.ht" OWNER TO "${cfg.git.user}";'
-        '';
-    })
-
     (mkIf cfg.meta.enable (mkMerge [
       {
         users.users.${cfg.meta.user} = {
@@ -347,10 +336,7 @@ in
         users.groups.${cfg.meta.group} = { };
 
         services.srht.settings = {
-          "meta.sr.ht" = {
-            connection-string = mkDefault "postgresql:///meta.sr.ht?user=${cfg.meta.user}&host=/run/postgresql";
-            migrate-on-upgrade = mkDefault "yes";
-          };
+          "meta.sr.ht".migrate-on-upgrade = mkDefault "yes";
           "meta.sr.ht::api".internal-ipnet = mkDefault "127.0.0.0/8,::1/128";
         };
 
@@ -363,8 +349,8 @@ in
             "meta.sr.ht-api.service"
             "meta.sr.ht-webhooks.service"
           ];
-          after = [ "postgresql.target" ];
-          requires = [ "postgresql.target" ];
+          after = optional config.services.postgresql.enable "postgresql.target";
+          requires = optional config.services.postgresql.enable "postgresql.target";
 
           serviceConfig = {
             Type = "oneshot";
@@ -387,7 +373,7 @@ in
         systemd.services."meta.sr.ht" = mkService "meta" {
           description = "meta.sr.ht web service";
           wantedBy = [ "multi-user.target" ];
-          requires = optional cfg.postgresql.enable "postgresql.target";
+          requires = optional config.services.postgresql.enable "postgresql.target";
           serviceConfig = {
             User = cfg.meta.user;
             Group = cfg.meta.group;
@@ -399,7 +385,7 @@ in
         systemd.services."meta.sr.ht-api" = mkService "meta" {
           description = "meta.sr.ht API service";
           wantedBy = [ "multi-user.target" ];
-          requires = optional cfg.postgresql.enable "postgresql.target";
+          requires = optional config.services.postgresql.enable "postgresql.target";
           serviceConfig = {
             User = cfg.meta.user;
             Group = cfg.meta.group;
@@ -410,7 +396,7 @@ in
         systemd.services."meta.sr.ht-webhooks" = mkService "meta" {
           description = "meta.sr.ht webhook delivery service";
           wantedBy = [ "multi-user.target" ];
-          requires = optional cfg.postgresql.enable "postgresql.target";
+          requires = optional config.services.postgresql.enable "postgresql.target";
           serviceConfig = {
             User = cfg.meta.user;
             Group = cfg.meta.group;
@@ -465,9 +451,6 @@ in
             shell = mkDefault "${cfg.git.package}/bin/git.sr.ht-shell";
             enable-dispatch = mkDefault true;
             migrate-on-upgrade = mkDefault "yes";
-          }
-          // optionalAttrs cfg.postgresql.enable {
-            connection-string = mkDefault "postgresql:///git.sr.ht?user=${cfg.git.user}&host=/run/postgresql";
           };
           "git.sr.ht::api".internal-ipnet = mkDefault "127.0.0.0/8,::1/128";
         };
@@ -487,8 +470,8 @@ in
             "git.sr.ht.service"
             "git.sr.ht-api.service"
           ];
-          after = [ "postgresql.target" ];
-          requires = [ "postgresql.target" ];
+          after = optional config.services.postgresql.enable "postgresql.target";
+          requires = optional config.services.postgresql.enable "postgresql.target";
 
           serviceConfig = {
             Type = "oneshot";
@@ -511,7 +494,7 @@ in
         systemd.services."git.sr.ht" = mkService "git" {
           description = "git.sr.ht web service";
           wantedBy = [ "multi-user.target" ];
-          requires = optional cfg.postgresql.enable "postgresql.target";
+          requires = optional config.services.postgresql.enable "postgresql.target";
           serviceConfig = {
             User = cfg.git.user;
             Group = cfg.git.group;
@@ -523,7 +506,7 @@ in
         systemd.services."git.sr.ht-api" = mkService "git" {
           description = "git.sr.ht API service";
           wantedBy = [ "multi-user.target" ];
-          requires = optional cfg.postgresql.enable "postgresql.target";
+          requires = optional config.services.postgresql.enable "postgresql.target";
           path = [ cfg.git.gitPackage ];
           serviceConfig = {
             User = cfg.git.user;
@@ -552,9 +535,7 @@ in
         };
       }
 
-      (mkIf cfg.nginx.enable {
-        services.nginx.recommendedProxySettings = mkDefault true;
-
+      {
         services.fcgiwrap.instances.gitsrht = {
           process.prefork = cfg.git.fcgiwrap.prefork;
           process.user = cfg.git.user;
@@ -564,12 +545,10 @@ in
           socket.group = "nginx";
           socket.mode = "0660";
         };
-      })
+      }
     ]))
 
-    (mkIf cfg.nginx.enable {
-      services.nginx.enable = mkDefault true;
-
+    (mkIf (cfg.meta.enable || cfg.git.enable) {
       services.nginx.virtualHosts = optionalAttrs (domain != null) {
         "meta.${domain}" = mkIf cfg.meta.enable (mkMerge [
           {
@@ -577,9 +556,11 @@ in
             enableACME = mkDefault true;
             locations."/" = {
               proxyPass = mkDefault "http://${cfg.listenAddress}:${toString cfg.meta.port}";
+              recommendedProxySettings = mkDefault true;
             };
             locations."/query" = {
               proxyPass = mkDefault "http://${cfg.listenAddress}:${toString cfg.meta.apiPort}";
+              recommendedProxySettings = mkDefault true;
             };
             locations."/static" = {
               root = "${assets}";
@@ -600,9 +581,11 @@ in
             '';
             locations."/" = {
               proxyPass = mkDefault "http://${cfg.listenAddress}:${toString cfg.git.port}";
+              recommendedProxySettings = mkDefault true;
             };
             locations."/query" = {
               proxyPass = mkDefault "http://${cfg.listenAddress}:${toString cfg.git.apiPort}";
+              recommendedProxySettings = mkDefault true;
             };
             locations."/static" = {
               root = "${assets}";
