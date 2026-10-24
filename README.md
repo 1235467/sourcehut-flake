@@ -88,7 +88,7 @@ from the importing configuration's own nixpkgs.
 | `services.srht.enable` | bool | `false` | enable the whole stack |
 | `services.srht.domain` | null or str | `null` | global domain of the instance; falls back to `networking.domain`. Used to derive `meta.<domain>` / `git.<domain>` origins |
 | `services.srht.listenAddress` | str | `127.0.0.1` | address the Gunicorn web services and the Go APIs bind to |
-| `services.srht.settings` | freeform attrs | `{}` | rendered to `/etc/sr.ht/config.ini`; see [settings](#settings-reference) |
+| `services.srht.settings` | attrs (typed keys + freeform) | `{}` | rendered to `/etc/sr.ht/config.ini`; frequently used keys are typed options with docs/examples (visible via `nixos-option services.srht.settings`), any other upstream key can be set through the freeform set; see [settings](#settings-reference) |
 
 ### `services.srht.meta.*` (meta.sr.ht, required by git.sr.ht)
 
@@ -118,11 +118,16 @@ from the importing configuration's own nixpkgs.
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|
-| `virtualHost` | attrs | `{}` | merged into the virtual hosts generated for `meta.<domain>` and `git.<domain>`, e.g. to set `enableACME = false` or provide `sslCertificate`/`sslCertificateKey` |
+| `virtualHost` | nginx vhost options | `{}` | merged into the virtual hosts generated for `meta.<domain>` and `git.<domain>`, typed with the nginx virtual-host options from nixpkgs (so `enableACME`, `sslCertificate`, `locations`, ... are checked), e.g. to set `enableACME = false` or provide `sslCertificate`/`sslCertificateKey` |
 
 The module only contributes vhost rules (proxy to the web/API ports, `/static`,
 HTTP clone via fcgiwrap, recommended proxy headers per location). It does not
 enable or otherwise configure `services.nginx`; enable nginx yourself.
+
+For both services, `apiPort` must stay exactly 100 above `port` (upstream
+derives the API origin as web port + 100); set
+`settings."<service>".api-origin` to decouple them. This is enforced by an
+assertion as well.
 
 TLS is enabled by default in the generated vhosts (`forceSSL` and
 `enableACME`), so either set `security.acme.acceptTerms` and
@@ -136,7 +141,10 @@ internal fcgiwrap instance, which the module configures automatically.
 format is the upstream `config.example.ini`; see the
 [git.sr.ht](https://git.sr.ht/~sircmpwn/git.sr.ht/tree/master/item/config.example.ini)
 and [meta.sr.ht](https://git.sr.ht/~sircmpwn/meta.sr.ht/tree/master/item/config.example.ini)
-examples).
+examples). Frequently used keys are declared as typed options with
+descriptions and examples (browse them with
+`nixos-option services.srht.settings`); any other upstream key can be added
+through the freeform attribute set.
 
 All keys below and everything you put in `services.srht.settings` are the
 upstream `config.ini` keys verbatim; the module invents no new keys. The only
@@ -168,8 +176,8 @@ not exist on NixOS.
 | `"sr.ht".redis-host` | Redis-compatible URL for caching/sessions, e.g. `redis://127.0.0.1:6379` (Redis, Valkey, DragonFly, `rediss://`, `unix://`, sentinel lists) | your infrastructure |
 | `"meta.sr.ht".webhooks` | **Celery broker URL** for the meta.sr.ht webhook delivery worker (queue for outgoing webhook events), e.g. `redis://127.0.0.1:6379/1`. Required when `meta.enable` | your infrastructure |
 
-A missing required key fails evaluation with an assertion message instead of a
-broken runtime service.
+Every listed key is enforced by an assertion, so a missing key fails the
+build with an actionable message instead of a broken runtime service.
 
 ### Optional settings (upstream keys, used verbatim)
 

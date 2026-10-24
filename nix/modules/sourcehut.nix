@@ -41,6 +41,36 @@ let
       );
   };
 
+  iniValueType = types.nullOr (
+    types.oneOf [
+      types.bool
+      types.int
+      types.float
+      types.str
+      types.path
+    ]
+  );
+
+  iniSectionType = types.attrsOf iniValueType;
+
+  mkIniOption = attrs: mkOption ({ type = iniValueType; default = null; } // attrs);
+
+  mkIniSection = options: types.submodule {
+    freeformType = iniSectionType;
+    inherit options;
+  };
+
+  # Typed with the nixpkgs nginx virtual-host options, so users get option
+  # checking and completion for the configuration merged into our vhosts.
+  nginxVhostOptions = import (pkgs.path + "/nixos/modules/services/web-servers/nginx/vhost-options.nix");
+
+  # Declared settings options default to null; drop them (and sections that
+  # end up empty) before rendering so the generated ini only contains keys
+  # that are actually set.
+  renderedSettings = lib.filterAttrs (name: section: section != { }) (
+    lib.mapAttrs (_: lib.filterAttrs (_: v: v != null)) cfg.settings
+  );
+
   python = pkgs.python3.withPackages (
     ps:
     [
@@ -110,22 +140,200 @@ in
     enable = mkEnableOption "SourceHut (git.sr.ht and meta.sr.ht)";
 
     settings = mkOption {
-      type = types.submodule { freeformType = settingsFormat.type; };
+      type = types.submodule {
+        freeformType = types.attrsOf iniSectionType;
+        options = {
+          "sr.ht" = mkOption {
+            type = mkIniSection {
+              global-domain = mkIniOption {
+                description = "Global domain of the instance; set from {option}`services.srht.domain`.";
+                example = "example.com";
+              };
+              environment = mkIniOption {
+                description = "Values other than `production` add a banner to each page.";
+                example = "production";
+              };
+              service-key = mkIniOption {
+                description = "Key encrypting session cookies. Generate with `sr.ht-keygen service`. Required.";
+              };
+              network-key = mkIniOption {
+                description = "Key encrypting internal messages, e.g. between services and for SSH dispatch. Generate with `sr.ht-keygen network`. Required.";
+              };
+              redis-host = mkIniOption {
+                description = "Redis-compatible URL used for caching and sessions (Redis, Valkey, DragonFly, `rediss://`, `unix://`, sentinel lists). Not managed by this module. Required.";
+                example = "redis://127.0.0.1:6379/0";
+              };
+              assets = mkIniOption {
+                description = "Asset directory; set automatically to the directory packaged by this module.";
+              };
+            };
+            default = { };
+          };
+
+          "webhooks" = mkOption {
+            type = mkIniSection {
+              private-key = mkIniOption {
+                description = "Base64-encoded Ed25519 key signing webhook payloads. Generate with `sr.ht-keygen webhook`. Required.";
+              };
+            };
+            default = { };
+          };
+
+          "meta.sr.ht" = mkOption {
+            type = mkIniSection {
+              connection-string = mkIniOption {
+                description = "PostgreSQL connection URL for meta.sr.ht, including credentials. Databases are not managed by this module. Required.";
+                example = "postgresql://meta:password@127.0.0.1/meta.sr.ht";
+              };
+              webhooks = mkIniOption {
+                description = "Celery broker URL for the meta.sr.ht webhook delivery worker. Required.";
+                example = "redis://127.0.0.1:6379/1";
+              };
+              origin = mkIniOption {
+                description = "URL meta.sr.ht is served at; defaults to `https://meta.<domain>`.";
+                example = "https://meta.example.com";
+              };
+              migrate-on-upgrade = mkIniOption {
+                description = "Whether database migrations are applied on boot (`sourcehut-migrate -a`).";
+                example = "yes";
+              };
+            };
+            default = { };
+          };
+
+          "meta.sr.ht::api" = mkOption {
+            type = mkIniSection {
+              internal-ipnet = mkIniOption {
+                description = "Subnets permitted to use internal API authentication.";
+                example = "127.0.0.0/8,::1/128";
+              };
+            };
+            default = { };
+          };
+
+          "meta.sr.ht::settings" = mkOption {
+            type = mkIniSection {
+              registration = mkIniOption {
+                description = "Whether public registration is permitted.";
+                example = "no";
+              };
+              onboarding-redirect = mkIniOption {
+                description = "Where new users are redirected after registration; defaults to `https://meta.<domain>`.";
+                example = "https://meta.example.com";
+              };
+              welcome-emails = mkIniOption {
+                description = "Whether stock welcome emails are sent after signup.";
+                example = "no";
+              };
+            };
+            default = { };
+          };
+
+          "git.sr.ht" = mkOption {
+            type = mkIniSection {
+              connection-string = mkIniOption {
+                description = "PostgreSQL connection URL for git.sr.ht, including credentials. Databases are not managed by this module. Required.";
+                example = "postgresql://git:password@127.0.0.1/git.sr.ht";
+              };
+              origin = mkIniOption {
+                description = "URL git.sr.ht is served at; defaults to `https://git.<domain>`.";
+                example = "https://git.example.com";
+              };
+              outgoing-domain = mkIniOption {
+                description = "Domain used for outgoing links in patchsets; defaults to `https://git.<domain>`.";
+                example = "https://git.example.com";
+              };
+              repos = mkIniOption {
+                description = "Path to git repositories on disk; set from {option}`services.srht.git.repos`.";
+              };
+              shell = mkIniOption {
+                description = "Shell dispatched to for authenticated SSH sessions; set from the packaged git.sr.ht.";
+              };
+              post-update-script = mkIniOption {
+                description = "Hook installed into every repository; set from the packaged git.sr.ht.";
+              };
+              enable-dispatch = mkIniOption {
+                description = "Whether this service is handled by the unified SSH dispatcher (`sourcehut-ssh`).";
+                example = true;
+              };
+              migrate-on-upgrade = mkIniOption {
+                description = "Whether database migrations are applied on boot (`sourcehut-migrate -a`).";
+                example = "yes";
+              };
+            };
+            default = { };
+          };
+
+          "git.sr.ht::api" = mkOption {
+            type = mkIniSection {
+              internal-ipnet = mkIniOption {
+                description = "Subnets permitted to use internal API authentication.";
+                example = "127.0.0.0/8,::1/128";
+              };
+            };
+            default = { };
+          };
+
+          "mail" = mkOption {
+            type = mkIniSection {
+              smtp-host = mkIniOption {
+                description = "Outgoing SMTP host. Without it, mail sending fails.";
+                example = "smtp.example.com";
+              };
+              smtp-port = mkIniOption {
+                description = "Outgoing SMTP port.";
+                example = 587;
+              };
+              smtp-user = mkIniOption { description = "Outgoing SMTP user."; };
+              smtp-password = mkIniOption { description = "Outgoing SMTP password."; };
+              smtp-from = mkIniOption {
+                description = "Sender address of outgoing mail.";
+                example = "noreply@example.com";
+              };
+              smtp-encryption = mkIniOption {
+                description = "SMTP encryption mode.";
+                example = "starttls";
+              };
+              smtp-auth = mkIniOption {
+                description = "SMTP authentication mode.";
+                example = "plain";
+              };
+              error-to = mkIniOption { description = "Address receiving application exceptions."; };
+              error-from = mkIniOption { description = "Address sending application exceptions."; };
+              pgp-privkey = mkIniOption {
+                description = "Path to the (passwordless) OpenPGP private key used to sign outgoing mail; keep it outside the Nix store.";
+              };
+              pgp-pubkey = mkIniOption { description = "Path to or inline OpenPGP public key."; };
+              pgp-key-id = mkIniOption { description = "OpenPGP key ID string."; };
+            };
+            default = { };
+          };
+
+          "objects" = mkOption {
+            type = mkIniSection {
+              s3-upstream = mkIniOption {
+                description = "S3-compatible object storage endpoint (optional).";
+                example = "https://s3.example.com";
+              };
+              s3-access-key = mkIniOption { description = "Access key for object storage."; };
+              s3-secret-key = mkIniOption {
+                description = "Path to the object storage secret key, outside the Nix store.";
+              };
+            };
+            default = { };
+          };
+        };
+      };
       default = { };
       description = ''
         Configuration written to {file}`/etc/sr.ht/config.ini`, following the
-        layout of the upstream `config.example.ini` files. Keys are used
-        verbatim, for example {option}`services.srht.settings.sr.ht.service-key`
-        or {option}`services.srht.settings."meta.sr.ht".connection-string`.
-
-        Infrastructure such as PostgreSQL and the Redis-compatible backend
-        is not managed by this module:
-        {option}`services.srht.settings."meta.sr.ht".connection-string`,
-        {option}`services.srht.settings."git.sr.ht".connection-string`,
-        {option}`services.srht.settings.sr.ht.redis-host` and
-        {option}`services.srht.settings."meta.sr.ht".webhooks` (the Celery
-        broker URL for the webhook worker, e.g. `redis://127.0.0.1:6379/1`)
-        must be configured to point at your own instances.
+        layout of the upstream
+        [git.sr.ht](https://git.sr.ht/~sircmpwn/git.sr.ht/tree/master/item/config.example.ini)
+        and [meta.sr.ht](https://git.sr.ht/~sircmpwn/meta.sr.ht/tree/master/item/config.example.ini)
+        `config.example.ini` files. Frequently used keys have typed options
+        with documentation and examples; any other upstream key can be set
+        through the freeform attribute set, e.g.
+        {option}`services.srht.settings."git.sr.ht".api-origin`.
       '';
     };
 
@@ -135,6 +343,8 @@ in
       description = ''
         The global domain of the SourceHut instance.
         Defaults to {option}`networking.domain`.
+        Sets {option}`services.srht.settings.sr.ht.global-domain` and derives
+        the `origin` defaults for meta.sr.ht and git.sr.ht.
       '';
     };
 
@@ -170,7 +380,12 @@ in
       apiPort = mkOption {
         type = types.port;
         default = 5100;
-        description = "Port the meta.sr.ht API listens on.";
+        description = ''
+          Port the meta.sr.ht API listens on. Upstream derives the API origin
+          from the web port plus 100, so this must be exactly 100 above
+          {option}`services.srht.meta.port` unless
+          {option}`services.srht.settings."meta.sr.ht".api-origin` is set.
+        '';
       };
     };
 
@@ -202,13 +417,21 @@ in
       apiPort = mkOption {
         type = types.port;
         default = 5101;
-        description = "Port the git.sr.ht API listens on.";
+        description = ''
+          Port the git.sr.ht API listens on. Upstream derives the API origin
+          from the web port plus 100, so this must be exactly 100 above
+          {option}`services.srht.git.port` unless
+          {option}`services.srht.settings."git.sr.ht".api-origin` is set.
+        '';
       };
 
       repos = mkOption {
         type = types.path;
         default = "/var/lib/git";
-        description = "Path to git repositories on disk.";
+        description = ''
+          Path to git repositories on disk; also the git user's home.
+          Sets {option}`services.srht.settings."git.sr.ht".repos`.
+        '';
       };
 
       gitPackage = mkPackageOption pkgs "git" { };
@@ -231,14 +454,16 @@ in
     };
 
     nginx.virtualHost = mkOption {
-      type = types.attrs;
+      type = types.submodule nginxVhostOptions;
       default = { };
       description = ''
-        Virtual host configuration merged into the virtual hosts this module
-        generates for `meta.<domain>` and `git.<domain>`, for instance to set
-        `enableACME` or TLS certificates. The module only contributes vhost
-        rules; enabling and configuring nginx itself is left to the user.
-        TLS via ACME is enabled by default, so
+        Configuration merged into the virtual hosts this module generates for
+        `meta.<domain>` and `git.<domain>`, typed with the nginx virtual host
+        options from nixpkgs (so `enableACME`, `sslCertificate`, `locations`,
+        ... can be set with checking and completion). The module only
+        contributes vhost rules; enabling and configuring nginx itself is
+        left to the user. TLS via ACME is enabled by default in the generated
+        vhosts, so {option}`security.acme.acceptTerms` and
         {option}`security.acme.defaults.email` should be set.
       '';
     };
@@ -250,11 +475,40 @@ in
         {
           assertion = domain != null;
           message = ''
-            services.srht.domain (or networking.domain) must be set.
+            services.srht.domain (or networking.domain) must be set; it is
+            used for settings."sr.ht".global-domain and the service origins.
           '';
         }
         {
-          assertion = !cfg.meta.enable || (cfg.settings."meta.sr.ht" or { }) ? connection-string;
+          assertion = cfg.settings."sr.ht".service-key != null;
+          message = ''
+            services.srht.settings."sr.ht".service-key must be set, generate
+            one with `sr.ht-keygen service`.
+          '';
+        }
+        {
+          assertion = cfg.settings."sr.ht".network-key != null;
+          message = ''
+            services.srht.settings."sr.ht".network-key must be set, generate
+            one with `sr.ht-keygen network`.
+          '';
+        }
+        {
+          assertion = cfg.settings."webhooks".private-key != null;
+          message = ''
+            services.srht.settings."webhooks".private-key must be set,
+            generate one with `sr.ht-keygen webhook`.
+          '';
+        }
+        {
+          assertion = cfg.settings."sr.ht".redis-host != null;
+          message = ''
+            services.srht.settings."sr.ht".redis-host must be set to point at
+            your Redis-compatible backend (Redis, Valkey, DragonFly, ...).
+          '';
+        }
+        {
+          assertion = !cfg.meta.enable || cfg.settings."meta.sr.ht".connection-string != null;
           message = ''
             services.srht.settings."meta.sr.ht".connection-string must be set
             to the PostgreSQL connection URL of the meta.sr.ht database,
@@ -263,7 +517,7 @@ in
           '';
         }
         {
-          assertion = !cfg.git.enable || (cfg.settings."git.sr.ht" or { }) ? connection-string;
+          assertion = !cfg.git.enable || cfg.settings."git.sr.ht".connection-string != null;
           message = ''
             services.srht.settings."git.sr.ht".connection-string must be set
             to the PostgreSQL connection URL of the git.sr.ht database,
@@ -272,18 +526,35 @@ in
           '';
         }
         {
-          assertion = (cfg.settings."sr.ht" or { }) ? redis-host;
-          message = ''
-            services.srht.settings."sr.ht".redis-host must be set to point at
-            your Redis-compatible backend (Redis, Valkey, DragonFly, ...).
-          '';
-        }
-        {
-          assertion = !cfg.meta.enable || (cfg.settings."meta.sr.ht" or { }) ? webhooks;
+          assertion = !cfg.meta.enable || cfg.settings."meta.sr.ht".webhooks != null;
           message = ''
             services.srht.settings."meta.sr.ht".webhooks must be set to the
             Celery broker URL used by the meta.sr.ht webhook delivery worker,
             for example "redis://127.0.0.1:6379/1".
+          '';
+        }
+        {
+          assertion =
+            !cfg.meta.enable
+            || cfg.meta.apiPort == cfg.meta.port + 100
+            || cfg.settings."meta.sr.ht" ? api-origin;
+          message = ''
+            services.srht.meta.apiPort must be exactly 100 above
+            services.srht.meta.port (upstream derives the API origin from the
+            web port plus 100), or
+            services.srht.settings."meta.sr.ht".api-origin must be set.
+          '';
+        }
+        {
+          assertion =
+            !cfg.git.enable
+            || cfg.git.apiPort == cfg.git.port + 100
+            || cfg.settings."git.sr.ht" ? api-origin;
+          message = ''
+            services.srht.git.apiPort must be exactly 100 above
+            services.srht.git.port (upstream derives the API origin from the
+            web port plus 100), or
+            services.srht.settings."git.sr.ht".api-origin must be set.
           '';
         }
         {
@@ -313,7 +584,7 @@ in
         "meta.sr.ht::settings".onboarding-redirect = mkDefault "https://meta.${domain}";
       };
 
-      environment.etc."sr.ht/config.ini".source = settingsFormat.generate "sourcehut-config.ini" cfg.settings;
+      environment.etc."sr.ht/config.ini".source = settingsFormat.generate "sourcehut-config.ini" renderedSettings;
 
       environment.systemPackages = [
         sourcehutPkgs.sourcehut-migrate
