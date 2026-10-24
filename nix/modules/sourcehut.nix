@@ -837,9 +837,11 @@ in
           home = mkDefault cfg.git.repos;
           description = mkDefault "git.sr.ht service user";
           # sshd runs the AuthorizedKeysCommand's command= through the user's
-          # login shell; with the NixOS default (nologin) every SSH session
-          # printed "This account is currently not available." instead.
-          shell = mkDefault pkgs.bashInteractive;
+          # login shell; with the default for system users (nologin) every
+          # SSH session printed "This account is currently not available."
+          # instead. Follow users.defaultUserShell, like the PostgreSQL
+          # module does for its user.
+          useDefaultShell = mkDefault true;
         };
 
         users.groups.${cfg.git.group} = { };
