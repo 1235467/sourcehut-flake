@@ -33,7 +33,12 @@ buildPythonApplication rec {
   ];
 
   # Only the ruff CLI is used, whose interface is stable across versions.
-  pythonRelaxDeps = [ "ruff" ];
+  # graphql-core 3.2.7 is a patch release; the lower bound is relaxed so the
+  # package also builds against slightly older nixpkgs revisions.
+  pythonRelaxDeps = [
+    "ruff"
+    "graphql-core"
+  ];
 
   doCheck = false;
 
