@@ -176,6 +176,7 @@ not exist on NixOS.
 | `"sr.ht".service-key` | key encrypting session cookies, shared by all services on the host | `sr.ht-keygen service` (from the `srht` package, also in `nix shell .#srht`) |
 | `"sr.ht".network-key` | key encrypting internal messages/service-to-service auth; must be identical across all services | `sr.ht-keygen network` |
 | `"webhooks".private-key` | base64 Ed25519 key signing webhook payloads | `sr.ht-keygen webhook` |
+| `"sr.ht".{site-name,site-info,site-blurb,source-url,owner-name,owner-email}` | presentational/contact settings read at import or render time without defaults; no defaults are provided on purpose | set your own values |
 | `"meta.sr.ht".connection-string` / `"git.sr.ht".connection-string` | PostgreSQL connection URL **including credentials**, e.g. `postgresql://meta:password@127.0.0.1/meta.sr.ht`. Databases and roles are not created by the module | your infrastructure |
 | `"sr.ht".redis-host` | Redis-compatible URL for caching/sessions, e.g. `redis://127.0.0.1:6379` (Redis, Valkey, DragonFly, `rediss://`, `unix://`, sentinel lists) | your infrastructure |
 | `"meta.sr.ht".webhooks` | **Celery broker URL** for the meta.sr.ht webhook delivery worker (queue for outgoing webhook events), e.g. `redis://127.0.0.1:6379/1`. Required when `meta.enable` | your infrastructure |

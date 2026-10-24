@@ -177,6 +177,30 @@ in
                 description = "Values other than `production` add a banner to each page.";
                 example = "production";
               };
+              site-name = mkIniOption {
+                description = "Name of your network of sr.ht-based sites. Required.";
+                example = "sourcehut";
+              };
+              site-info = mkIniOption {
+                description = "The top-level info page for your site. Required.";
+                example = "https://sourcehut.org";
+              };
+              site-blurb = mkIniOption {
+                description = "Short description used by templates. Required.";
+                example = "the hacker's forge";
+              };
+              source-url = mkIniOption {
+                description = "The source code for your fork of sr.ht. Required.";
+                example = "https://git.sr.ht/~sircmpwn/srht";
+              };
+              owner-name = mkIniOption {
+                description = "Name of the instance owner, used in audit logs and templates. Required.";
+                example = "Jane Doe";
+              };
+              owner-email = mkIniOption {
+                description = "Contact address of the instance owner. Required.";
+                example = "admin@example.com";
+              };
               service-key = mkIniOption {
                 description = "Key encrypting session cookies. Generate with `sr.ht-keygen service`. Required.";
               };
@@ -519,6 +543,48 @@ in
           message = ''
             services.srht.domain (or networking.domain) must be set; it is
             used for settings."sr.ht".global-domain and the service origins.
+          '';
+        }
+        {
+          assertion = cfg.settings."sr.ht".site-name != null;
+          message = ''
+            services.srht.settings."sr.ht".site-name must be set
+            (it is read at import time by metasrht/audit.py, no default).
+          '';
+        }
+        {
+          assertion = cfg.settings."sr.ht".site-info != null;
+          message = ''
+            services.srht.settings."sr.ht".site-info must be set
+            (used when rendering pages, no default).
+          '';
+        }
+        {
+          assertion = cfg.settings."sr.ht".site-blurb != null;
+          message = ''
+            services.srht.settings."sr.ht".site-blurb must be set
+            (used when rendering pages, no default).
+          '';
+        }
+        {
+          assertion = cfg.settings."sr.ht".source-url != null;
+          message = ''
+            services.srht.settings."sr.ht".source-url must be set
+            (used when rendering pages, no default).
+          '';
+        }
+        {
+          assertion = cfg.settings."sr.ht".owner-name != null;
+          message = ''
+            services.srht.settings."sr.ht".owner-name must be set
+            (read at import time by metasrht, no default).
+          '';
+        }
+        {
+          assertion = cfg.settings."sr.ht".owner-email != null;
+          message = ''
+            services.srht.settings."sr.ht".owner-email must be set
+            (read at import time by metasrht, no default).
           '';
         }
         {
