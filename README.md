@@ -129,11 +129,6 @@ The module only contributes vhost rules (proxy to the web/API ports, `/static`,
 HTTP clone via fcgiwrap, recommended proxy headers per location). It does not
 enable or otherwise configure `services.nginx`; enable nginx yourself.
 
-For both services, `apiPort` must stay exactly 100 above `port` (upstream
-derives the API origin as web port + 100); set
-`settings."<service>".api-origin` to decouple them. This is enforced by an
-assertion as well.
-
 TLS is enabled by default in the generated vhosts (`forceSSL` and
 `enableACME`), so either set `security.acme.acceptTerms` and
 `security.acme.defaults.email`, or override the vhosts via
@@ -166,6 +161,7 @@ not exist on NixOS.
 | `"sr.ht".environment` | `production` |
 | `"sr.ht".assets` | combined asset directory (SCSS, static files, SQL schema, migrations) |
 | `"meta.sr.ht".origin` / `"git.sr.ht".origin` | `https://meta.<domain>` / `https://git.<domain>` |
+| `"meta.sr.ht".api-internal-origin` / `"git.sr.ht".api-internal-origin` | `http://127.0.0.1:<apiPort>`; used by frontends and the SSH dispatcher for internal GraphQL calls (external clients keep using `origin`) |
 | `"meta.sr.ht".migrate-on-upgrade`, `"git.sr.ht".migrate-on-upgrade` | `yes` (runs `sourcehut-migrate <service> -a` on boot) |
 | `"git.sr.ht".repos`, `"git.sr.ht".post-update-script`, `"git.sr.ht".shell`, `"git.sr.ht".enable-dispatch` | derived from the options above (SSH dispatch, repo path, update hook) |
 | `"git.sr.ht".outgoing-domain`, `"meta.sr.ht::settings".onboarding-redirect` | https URLs under the instance domain |

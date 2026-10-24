@@ -181,6 +181,10 @@ in
 
           "meta.sr.ht" = mkOption {
             type = mkIniSection {
+              api-internal-origin = mkIniOption {
+                description = "Address the GraphQL API is reached at internally (frontends, SSH dispatcher, ...). Defaults to the loopback API port; `origin` is used when unset.";
+                example = "http://127.0.0.1:5100";
+              };
               connection-string = mkIniOption {
                 description = "PostgreSQL connection URL for meta.sr.ht, including credentials. Databases are not managed by this module. Required.";
                 example = "postgresql://meta:password@127.0.0.1/meta.sr.ht";
@@ -231,6 +235,10 @@ in
 
           "git.sr.ht" = mkOption {
             type = mkIniSection {
+              api-internal-origin = mkIniOption {
+                description = "Address the GraphQL API is reached at internally (frontends, SSH dispatcher, ...). Defaults to the loopback API port; `origin` is used when unset.";
+                example = "http://127.0.0.1:5101";
+              };
               connection-string = mkIniOption {
                 description = "PostgreSQL connection URL for git.sr.ht, including credentials. Databases are not managed by this module. Required.";
                 example = "postgresql://git:password@127.0.0.1/git.sr.ht";
@@ -381,10 +389,9 @@ in
         type = types.port;
         default = 5100;
         description = ''
-          Port the meta.sr.ht API listens on. Upstream derives the API origin
-          from the web port plus 100, so this must be exactly 100 above
-          {option}`services.srht.meta.port` unless
-          {option}`services.srht.settings."meta.sr.ht".api-origin` is set.
+          Port the meta.sr.ht API listens on. Used by the generated nginx
+          `/query` location and by the default internal API origin
+          ({option}`services.srht.settings."meta.sr.ht".api-internal-origin`).
         '';
       };
     };
@@ -418,10 +425,9 @@ in
         type = types.port;
         default = 5101;
         description = ''
-          Port the git.sr.ht API listens on. Upstream derives the API origin
-          from the web port plus 100, so this must be exactly 100 above
-          {option}`services.srht.git.port` unless
-          {option}`services.srht.settings."git.sr.ht".api-origin` is set.
+          Port the git.sr.ht API listens on. Used by the generated nginx
+          `/query` location and by the default internal API origin
+          ({option}`services.srht.settings."git.sr.ht".api-internal-origin`).
         '';
       };
 
@@ -535,30 +541,6 @@ in
         }
         {
           assertion =
-            !cfg.meta.enable
-            || cfg.meta.apiPort == cfg.meta.port + 100
-            || cfg.settings."meta.sr.ht" ? api-origin;
-          message = ''
-            services.srht.meta.apiPort must be exactly 100 above
-            services.srht.meta.port (upstream derives the API origin from the
-            web port plus 100), or
-            services.srht.settings."meta.sr.ht".api-origin must be set.
-          '';
-        }
-        {
-          assertion =
-            !cfg.git.enable
-            || cfg.git.apiPort == cfg.git.port + 100
-            || cfg.settings."git.sr.ht" ? api-origin;
-          message = ''
-            services.srht.git.apiPort must be exactly 100 above
-            services.srht.git.port (upstream derives the API origin from the
-            web port plus 100), or
-            services.srht.settings."git.sr.ht".api-origin must be set.
-          '';
-        }
-        {
-          assertion =
             !(cfg.git.enable && cfg.git.manageSshd)
             || config.services.openssh.authorizedKeysCommand == sshCommand;
           message = ''
@@ -570,19 +552,27 @@ in
         }
       ];
 
-      services.srht.settings = {
-        "sr.ht" = {
-          environment = mkDefault "production";
-          global-domain = mkDefault domain;
-          assets = mkDefault "${assets}";
-        };
-      }
-      // optionalAttrs (domain != null) {
-        "meta.sr.ht".origin = mkDefault "https://meta.${domain}";
-        "git.sr.ht".origin = mkDefault "https://git.${domain}";
-        "git.sr.ht".outgoing-domain = mkDefault "https://git.${domain}";
-        "meta.sr.ht::settings".onboarding-redirect = mkDefault "https://meta.${domain}";
-      };
+      services.srht.settings = mkMerge [
+        {
+          "sr.ht" = {
+            environment = mkDefault "production";
+            global-domain = mkDefault domain;
+            assets = mkDefault "${assets}";
+          };
+        }
+        (mkIf cfg.meta.enable {
+          "meta.sr.ht".api-internal-origin = mkDefault "http://127.0.0.1:${toString cfg.meta.apiPort}";
+        })
+        (mkIf cfg.git.enable {
+          "git.sr.ht".api-internal-origin = mkDefault "http://127.0.0.1:${toString cfg.git.apiPort}";
+        })
+        (optionalAttrs (domain != null) {
+          "meta.sr.ht".origin = mkDefault "https://meta.${domain}";
+          "git.sr.ht".origin = mkDefault "https://git.${domain}";
+          "git.sr.ht".outgoing-domain = mkDefault "https://git.${domain}";
+          "meta.sr.ht::settings".onboarding-redirect = mkDefault "https://meta.${domain}";
+        })
+      ];
 
       environment.etc."sr.ht/config.ini".source = settingsFormat.generate "sourcehut-config.ini" renderedSettings;
 
