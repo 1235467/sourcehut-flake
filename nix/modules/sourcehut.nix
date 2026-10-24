@@ -63,8 +63,6 @@ let
     pathsToLink = [ "/share/sourcehut" ];
   };
 
-  redisUrl = "redis://${cfg.redis.host}:${toString cfg.redis.port}";
-
   sshCommand = "${sourcehutPkgs.sourcehut-ssh}/bin/sourcehut-ssh \"%u\" \"%h\" \"%t\" \"%k\"";
 
   configFile = config.environment.etc."sr.ht/config.ini".source;
@@ -98,8 +96,7 @@ let
         "network.target"
         "sourcehut-migrate-${service}.service"
       ]
-      ++ optional cfg.postgresql.enable "postgresql.target"
-      ++ optional cfg.redis.enable "redis-sourcehut.service";
+      ++ optional cfg.postgresql.enable "postgresql.target";
       restartTriggers = [ configFile ];
     }
     // extra
@@ -121,6 +118,11 @@ in
         layout of the upstream `config.example.ini` files. Keys are used
         verbatim, for example {option}`services.srht.settings.sr.ht.service-key`
         or {option}`services.srht.settings."meta.sr.ht".connection-string`.
+
+        Infrastructure such as the Redis-compatible backend is not managed by
+        this module: {option}`services.srht.settings.sr.ht.redis-host` (and
+        {option}`services.srht.settings."meta.sr.ht".webhooks` for meta.sr.ht)
+        must be configured to point at your own instance.
       '';
     };
 
@@ -241,42 +243,6 @@ in
     };
 
     postgresql.enable = mkEnableOption "local PostgreSQL integration";
-
-    redis = {
-      enable = mkEnableOption ''
-        local Redis integration, running a dedicated Redis server instance
-
-        Disable this to use any other Redis-compatible backend
-        (Valkey, DragonFly, a remote Redis, a Unix socket, ...).
-        In that case {option}`services.srht.settings.sr.ht.redis-host`
-        and {option}`services.srht.settings."meta.sr.ht".webhooks` must be
-        set to point at the backend, for example:
-
-        ```nix
-        services.srht.redis.enable = false;
-        services.srht.settings = {
-          "sr.ht".redis-host = "redis://127.0.0.1:6379";
-          "meta.sr.ht".webhooks = "redis://127.0.0.1:6379/1";
-        };
-        ```
-      '';
-
-      host = mkOption {
-        type = types.str;
-        default = "127.0.0.1";
-        description = ''
-          Host of the Redis-compatible backend. When
-          {option}`services.srht.redis.enable` is true, this is also the
-          address the dedicated Redis instance binds to.
-        '';
-      };
-
-      port = mkOption {
-        type = types.port;
-        default = 6380;
-        description = "Port of the Redis-compatible backend.";
-      };
-    };
   };
 
   config = mkIf cfg.enable (mkMerge [
@@ -289,21 +255,18 @@ in
           '';
         }
         {
-          assertion = cfg.redis.enable || ((cfg.settings."sr.ht" or { }) ? redis-host);
+          assertion = (cfg.settings."sr.ht" or { }) ? redis-host;
           message = ''
-            services.srht.redis.enable is disabled, so
             services.srht.settings."sr.ht".redis-host must be set to point at
-            your Redis-compatible backend.
+            your Redis-compatible backend (Redis, Valkey, DragonFly, ...).
           '';
         }
         {
-          assertion =
-            !cfg.meta.enable || cfg.redis.enable || ((cfg.settings."meta.sr.ht" or { }) ? webhooks);
+          assertion = !cfg.meta.enable || (cfg.settings."meta.sr.ht" or { }) ? webhooks;
           message = ''
-            services.srht.redis.enable is disabled, so
             services.srht.settings."meta.sr.ht".webhooks must be set to a
-            broker URL on your Redis-compatible backend for the
-            meta.sr.ht webhook worker.
+            broker URL on your Redis-compatible backend for the meta.sr.ht
+            webhook worker.
           '';
         }
         {
@@ -331,9 +294,6 @@ in
         "git.sr.ht".origin = mkDefault "https://git.${domain}";
         "git.sr.ht".outgoing-domain = mkDefault "https://git.${domain}";
         "meta.sr.ht::settings".onboarding-redirect = mkDefault "https://meta.${domain}";
-      }
-      // optionalAttrs cfg.redis.enable {
-        "sr.ht".redis-host = mkDefault "${redisUrl}/0";
       };
 
       environment.etc."sr.ht/config.ini".source = settingsFormat.generate "sourcehut-config.ini" cfg.settings;
@@ -346,28 +306,6 @@ in
         "f /var/log/sourcehut-ssh.log 0644 root root -"
       ];
     }
-
-    (mkIf cfg.redis.enable {
-      services.redis.servers.sourcehut = {
-        enable = true;
-        bind = cfg.redis.host;
-        port = cfg.redis.port;
-        save = [
-          [
-            1800
-            10
-          ]
-          [
-            300
-            100
-          ]
-        ];
-        settings = {
-          maxmemory = "128MB";
-          maxmemory-policy = "volatile-ttl";
-        };
-      };
-    })
 
     (mkIf cfg.postgresql.enable {
       services.postgresql.enable = mkDefault true;
@@ -411,9 +349,6 @@ in
           "meta.sr.ht" = {
             connection-string = mkDefault "postgresql:///meta.sr.ht?user=${cfg.meta.user}&host=/run/postgresql";
             migrate-on-upgrade = mkDefault "yes";
-          }
-          // optionalAttrs cfg.redis.enable {
-            webhooks = mkDefault "${redisUrl}/1";
           };
           "meta.sr.ht::api".internal-ipnet = mkDefault "127.0.0.0/8,::1/128";
         };
@@ -532,9 +467,6 @@ in
           }
           // optionalAttrs cfg.postgresql.enable {
             connection-string = mkDefault "postgresql:///git.sr.ht?user=${cfg.git.user}&host=/run/postgresql";
-          }
-          // optionalAttrs cfg.redis.enable {
-            webhooks = mkDefault "${redisUrl}/2";
           };
           "git.sr.ht::api".internal-ipnet = mkDefault "127.0.0.0/8,::1/128";
         };
