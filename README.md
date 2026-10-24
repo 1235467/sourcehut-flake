@@ -179,7 +179,7 @@ not exist on NixOS.
 | `"sr.ht".{site-name,site-info,site-blurb,source-url,owner-name,owner-email}` | presentational/contact settings read at import or render time without defaults; no defaults are provided on purpose | set your own values |
 | `"mail".smtp-from` | sender address; must be present and a valid address because the Go APIs read it unconditionally (SMTP host itself stays optional) |
 | `"meta.sr.ht::billing".enabled` | `yes`/`no`; read at startup by metasrht (use `no` unless running Stripe billing) |
-| `"meta.sr.ht".connection-string` / `"git.sr.ht".connection-string` | PostgreSQL connection URL **including credentials**, e.g. `postgresql://meta:password@127.0.0.1/meta.sr.ht`. Databases and roles are not created by the module | your infrastructure |
+| `"meta.sr.ht".connection-string` / `"git.sr.ht".connection-string` | PostgreSQL connection URL **including credentials**, e.g. `postgresql://meta:password@127.0.0.1/meta.sr.ht?sslmode=disable`. Databases and roles are not created by the module. The Go components default to `sslmode=require`, so add `?sslmode=disable` when connecting over TCP to a server without TLS (or use a Unix socket URL, e.g. `postgresql:///meta.sr.ht?user=meta&host=/run/postgresql`) | your infrastructure |
 | `"sr.ht".redis-host` | Redis-compatible URL for caching/sessions, e.g. `redis://127.0.0.1:6379` (Redis, Valkey, DragonFly, `rediss://`, `unix://`, sentinel lists) | your infrastructure |
 | `"meta.sr.ht".webhooks` | **Celery broker URL** for the meta.sr.ht webhook delivery worker (queue for outgoing webhook events), e.g. `redis://127.0.0.1:6379/1`. Required when `meta.enable` | your infrastructure |
 

@@ -70,9 +70,16 @@ CREATE DATABASE "git.sr.ht" OWNER git;
 ```
 
 then point the module at it, e.g.
-`"meta.sr.ht".connection-string = "postgresql://meta:…@db.example.com/meta.sr.ht"`.
+`"meta.sr.ht".connection-string = "postgresql://meta:…@db.example.com/meta.sr.ht?sslmode=disable"`.
 Being the database owner is sufficient on PostgreSQL 15+ (the owner owns the
 `public` schema).
+
+Note on TLS: the Python services use libpq semantics (`sslmode` defaults to
+`prefer`), but the Go components (`git.sr.ht-api`, `meta.sr.ht-api`,
+`git.sr.ht-http-clone`) use `lib/pq`, which defaults to `sslmode=require`. When
+connecting over TCP to a PostgreSQL server without TLS you must therefore add
+`?sslmode=disable` to the connection string (or use a Unix socket host such as
+`host=/run/postgresql`, where SSL is not attempted).
 
 ### Migrations
 
