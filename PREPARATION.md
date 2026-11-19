@@ -255,7 +255,11 @@ on hosts without nested virtualization. Practical consequences:
   into the system closure automatically — nothing needs to be installed.
   runsc ignores SUID/SGID bits unless `--allow-suid` is given, so the
   module passes it via `runtimeArgs` automatically; without it in-guest
-  `sudo` fails with "effective uid is not 0"
+  `sudo` fails with "effective uid is not 0". Note that gVisor's
+  namespace emulation is incomplete: the Nix sandboxed builder cannot
+  run inside runsc guests at all (`unexpected EOF reading a line`,
+  even with `sandbox = false`), so the `nix/latest` image — and any
+  manifest that runs `nix build` — requires the default runc runtime
 
 The nix image (`images/nix/latest`) is assembled differently from the
 rest: its guest package set is a `buildEnv` pinned by a committed
