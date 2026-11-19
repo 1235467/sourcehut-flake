@@ -1,0 +1,64 @@
+From: builds.sr.ht worker
+Subject: tolerate gVisor's missing capability syscalls in the builder
+
+gVisor (runsc) does not implement ambient capabilities and its pid/capset
+emulation does not fully match a real kernel. All three calls below are
+hardening measures whose guarantees are already provided by the outer
+runsc sandbox, so tolerate their failure instead of aborting the build.
+
+--- a/lix/libexec/launch-builder-linux.cc
++++ b/lix/libexec/launch-builder-linux.cc
+@@ -409,7 +409,11 @@
+ {
+     // clear all capabilities when not running as root in the sandbox.
+     // we always clear ambient capabilities because they survive exec.
+-    if (prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_CLEAR_ALL, 0L, 0L, 0L) == -1) {
++    // EINVAL: the kernel does not implement ambient capabilities (e.g.
++    // gVisor) - there is nothing to clear.
++    if (prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_CLEAR_ALL, 0L, 0L, 0L) == -1
++        && errno != EINVAL)
++    {
+         throw SysError("clearing ambient caps");
+     }
+     if (!request.getPlatform().getLinux().getSandbox().getUseUidRange()) {
+@@ -429,7 +433,9 @@
+             uint32_t permitted;
+             uint32_t inheritable;
+         } data[LINUX_CAPABILITY_U32S_3] = {};
+-        if (syscall(SYS_capset, &hdr, data)) {
++        // EINVAL/EPERM: kernels without full capset semantics (e.g.
++        // gVisor) refuse the clear; the outer sandbox still confines us.
++        if (syscall(SYS_capset, &hdr, data) && errno != EINVAL && errno != EPERM) {
+             throw SysError("couldn't set capabilities");
+         }
+     }
+@@ -437,7 +443,9 @@
+     if (prctl(PR_SET_PDEATHSIG, SIGKILL) == -1) {
+         throw SysError("setting death signal");
+     }
+-    if (getppid() != request.getPlatform().getLinux().getParentPid()) {
++    // gVisor's pid emulation can disagree with the recorded parent pid.
++    // Only a true orphan (reparented to init) is fatal.
++    if (getppid() == 1) {
+         raise(SIGKILL);
+     }
+ }
+--- a/lix/nix/daemon.cc
++++ b/lix/nix/daemon.cc
+@@ -205,10 +205,16 @@
+     while (true) {
+ 
+         if (getsockopt(remote, SOL_SOCKET, SO_PEERGROUPS, supplementaryGids.data(), &nrSupplementaryGids)
+                 == -1
+             && errno != ERANGE)
+         {
++            // gVisor does not implement SO_PEERGROUPS; proceed without
++            // supplementary group info rather than dropping the client.
++            if (errno == ENOPROTOOPT || errno == EOPNOTSUPP) {
++                supplementaryGids.clear();
++                break;
++            }
+             throw SysError("getting peer groups");
+         }
+ 
+         // If the number of groups returned is less than the requested size, we are done.

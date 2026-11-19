@@ -255,11 +255,17 @@ on hosts without nested virtualization. Practical consequences:
   into the system closure automatically — nothing needs to be installed.
   runsc ignores SUID/SGID bits unless `--allow-suid` is given, so the
   module passes it via `runtimeArgs` automatically; without it in-guest
-  `sudo` fails with "effective uid is not 0". Note that gVisor's
-  namespace emulation is incomplete: the Nix sandboxed builder cannot
-  run inside runsc guests at all (`unexpected EOF reading a line`,
-  even with `sandbox = false`), so the `nix/latest` image — and any
-  manifest that runs `nix build` — requires the default runc runtime
+  `sudo` fails with "effective uid is not 0". Note that gVisor cannot
+  create mount/user/pid namespaces inside a guest, so the stock CppNix
+  builder cannot run there at all (`unexpected EOF reading a line`,
+  even with `sandbox = false`). The `nix/latest` image therefore ships
+  a patched Lix (see `images/nix/latest/lix-gvisor.patch`) whose
+  non-sandbox builder avoids namespaces entirely and tolerates the
+  capability syscalls runsc does not emulate; `sandbox = false` is set
+  guest-wide and the runsc boundary is the real sandbox. `nix build`
+  works in that image, but nested sandboxing (`--option sandbox true`)
+  and anything else that creates namespaces inside the guest still
+  cannot run under gVisor
 
 The nix image (`images/nix/latest`) is assembled differently from the
 rest: its guest package set is a `buildEnv` pinned by a committed

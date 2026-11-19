@@ -9,15 +9,20 @@ FROM docker.io/nixos/nix:${RELEASE}
 # The guest package set is built declaratively from the committed
 # flake.nix/flake.lock (nix build) — nothing is installed with
 # nix-env or nix profile.
-COPY flake.nix flake.lock /guest/
+COPY flake.nix flake.lock lix-gvisor.patch /guest/
 
-RUN printf 'experimental-features = nix-command flakes\n' >> /etc/nix/nix.conf \
+# sandbox = false: gVisor cannot create the mount/user namespaces that a
+# sandboxed builder needs. The runsc sandbox is the isolation boundary;
+# builds still run as unprivileged nixbld users.
+RUN printf 'experimental-features = nix-command flakes\nsandbox = false\n' >> /etc/nix/nix.conf \
 	&& mkdir -p /opt \
 	&& nix build /guest#guestEnv -o /opt/guest-env
 
 RUN mkdir -p /usr/bin /usr/sbin /home/build /run/sshd /var/empty /etc/pam.d /etc/ssh \
-	&& ln -sfn /opt/guest-env/bin/* /usr/bin/ \
 	&& ln -sfn /nix/var/nix/profiles/default/bin/* /usr/bin/ \
+	# Link the guest env last so the patched Lix provides nix/nix-daemon
+	# (gVisor-compatible) instead of the base image's CppNix.
+	&& ln -sfn /opt/guest-env/bin/* /usr/bin/ \
 	&& ln -sfn /opt/guest-env/bin/sshd /usr/sbin/sshd \
 	&& ln -sfn /opt/guest-env/bin/bash /bin/bash \
 	&& rm -f /usr/bin/sudo \
