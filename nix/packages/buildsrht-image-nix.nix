@@ -16,6 +16,25 @@ let
     patches = (old.patches or [ ]) ++ [ ./lix-gvisor.patch ];
   });
 
+  contents = [
+    pkgs.bashInteractive
+    pkgs.gitMinimal
+    pkgs.mercurial
+    pkgs.curl
+    pkgs.cacert
+    pkgs.openssh
+    lix
+    pkgs.busybox
+  ];
+
+  # The image ships /nix/store contents without a nix database. If the
+  # guest later builds this very image (or anything referencing these
+  # paths), the daemon sees them as invalid and re-substitutes them,
+  # deleting and re-unpacking files mid-build — launch-builder then
+  # starts while e.g. libcapnp is missing. Registering every shipped
+  # path at boot makes them valid so they are never refetched.
+  closureInfo = pkgs.closureInfo { rootPaths = contents; };
+
   nixbldUsers = pkgs.runCommand "nixbld-users" { } ''
     mkdir -p $out
     {
@@ -29,6 +48,13 @@ let
   '';
 
   entrypoint = pkgs.writeShellScript "entrypoint" ''
+    echo "registering nix store paths"
+    ${lix}/bin/nix-store --load-db < /nix-path-registration
+    # Created here rather than in fakeRootCommands: proot binds the
+    # real /nix into the fake root, so writing under /nix during image
+    # build would land on the build host, not the layer.
+    mkdir -p /nix/var/nix/daemon-socket
+    chmod 1777 /nix/var/nix/daemon-socket
     echo "starting nix-daemon"
     ${lix}/bin/nix-daemon --daemon &
     echo "starting sshd"
@@ -133,16 +159,7 @@ pkgs.dockerTools.buildLayeredImage {
   # sandbox's own root filesystem.
   enableFakechroot = true;
 
-  contents = [
-    pkgs.bashInteractive
-    pkgs.gitMinimal
-    pkgs.mercurial
-    pkgs.curl
-    pkgs.cacert
-    pkgs.openssh
-    lix
-    pkgs.busybox
-  ];
+  inherit contents;
 
   # Contents merge into per-file symlinks; /etc, /home and friends are
   # rebuilt here as real directories so ownership, modes and
@@ -153,7 +170,7 @@ pkgs.dockerTools.buildLayeredImage {
     mkdir -p /etc/pam.d /etc/nix /etc/ssh /etc/ssl/certs \
       /home/build/.ssh /home/build/secrets \
       /tmp /var/tmp /var/empty /run/sshd /root \
-      /nix/var/nix/daemon-socket /usr/bin /usr/sbin
+      /usr/bin /usr/sbin
 
     cat ${pkgs.writeText "passwd" etc.passwd} > /etc/passwd
     cat ${pkgs.writeText "group" etc.group} > /etc/group
@@ -175,13 +192,14 @@ pkgs.dockerTools.buildLayeredImage {
     ln -sf ${pkgs.busybox}/bin/busybox /usr/bin/env
     ln -sf ${pkgs.bashInteractive}/bin/bash /bin/sh
     cp ${entrypoint} /entrypoint
+    cp ${closureInfo}/registration /nix-path-registration
 
     chmod 755 /entrypoint /etc
     chmod 600 /etc/shadow
     chmod 440 /etc/sudoers
-    chmod 1777 /tmp /var/tmp /nix/var/nix/daemon-socket
+    chmod 1777 /tmp /var/tmp
     chmod 700 /root /home/build/.ssh
-    chown -R 0:0 /etc /tmp /var /run /root /usr /entrypoint /nix/var
+    chown -R 0:0 /etc /tmp /var /run /root /usr /entrypoint /nix-path-registration
     chown -R 1000:1000 /home/build
 
     ${pkgs.openssh}/bin/ssh-keygen -A
