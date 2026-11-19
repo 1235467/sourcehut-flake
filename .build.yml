@@ -9,10 +9,11 @@ tasks:
       cd sourcehut-flake
       export NIKS3_SERVER_URL=$(cat ~/secrets/niks3-url.txt)
       export NIKS3_AUTH_TOKEN_FILE=$HOME/secrets/niks3-token.txt
-      # sudo -> root is a trusted user, so --extra-* flags are honored.
+      # build is a trusted user in this image, so --extra-* flags are
+      # honored without sudo (keeps the suid attack surface closed).
       # s3 is kept at a lower priority than cache.nixos.org since it
       # bills per request.
-      sudo nix build \
+      nix build \
         --extra-substituters "$(cat ~/secrets/niks3-public-url.txt)?priority=50" \
         --extra-trusted-public-keys 'my-cache-1:O2jwJZcCqgv6iMe3pBCDZuK43BSnxfUbZi6y9n7muSY=' \
         .#buildsrht .#gitsrht .#metasrht .#srht .#scmsrht \

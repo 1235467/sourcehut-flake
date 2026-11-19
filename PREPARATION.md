@@ -265,7 +265,8 @@ on hosts without nested virtualization. Practical consequences:
   guest-wide and the runsc boundary is the real sandbox. `nix build`
   works in that image, but nested sandboxing (`--option sandbox true`)
   and anything else that creates namespaces inside the guest still
-  cannot run under gVisor
+  cannot run under gVisor. `build` is in `trusted-users`, so manifests
+  pass per-job substituters/keys to the daemon without sudo
 
 The nix image (`images/nix/latest`) is assembled differently from the
 rest: its guest package set is a `buildEnv` pinned by a committed

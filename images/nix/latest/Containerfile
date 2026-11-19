@@ -14,7 +14,9 @@ COPY flake.nix flake.lock lix-gvisor.patch /guest/
 # sandbox = false: gVisor cannot create the mount/user namespaces that a
 # sandboxed builder needs. The runsc sandbox is the isolation boundary;
 # builds still run as unprivileged nixbld users.
-RUN printf 'experimental-features = nix-command flakes\nsandbox = false\n' >> /etc/nix/nix.conf \
+# trusted-users: build talks to nix-daemon directly, so manifests pass
+# --extra-substituters/--extra-trusted-public-keys without sudo.
+RUN printf 'experimental-features = nix-command flakes\nsandbox = false\ntrusted-users = root build\n' >> /etc/nix/nix.conf \
 	&& mkdir -p /opt \
 	&& nix build /guest#guestEnv -o /opt/guest-env
 
