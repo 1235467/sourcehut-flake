@@ -1,0 +1,29 @@
+ARG RELEASE=latest
+FROM docker.io/library/alpine:${RELEASE}
+
+# Guest contract expected by builds.sr.ht workers:
+#   * sshd on port 22, `build` user with an empty password
+#   * NOPASSWD sudo
+#   * bash (build task preamble), git, mercurial, curl
+RUN apk add --no-cache \
+		alpine-sdk \
+		bash \
+		curl \
+		git \
+		gnupg \
+		mercurial \
+		openssh \
+		sudo \
+		tzdata \
+	&& adduser -u 1000 -D -h /home/build -s /bin/bash build \
+	&& adduser build wheel \
+	&& passwd -d build \
+	&& printf '%%wheel ALL=(ALL) NOPASSWD: ALL\n' >> /etc/sudoers \
+	&& ssh-keygen -A \
+	&& printf 'PermitEmptyPasswords yes\n' >> /etc/ssh/sshd_config \
+	&& printf '[user]\n\tname = builds.sr.ht\n\temail = builds@sr.ht\n' \
+		> /home/build/.gitconfig \
+	&& chown build:build /home/build/.gitconfig
+
+EXPOSE 22
+CMD ["/usr/sbin/sshd", "-D", "-e"]

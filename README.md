@@ -16,6 +16,7 @@ Currently covered services (the only ones this flake packages):
 |---|---|---|
 | [git.sr.ht](https://git.sr.ht/~sircmpwn/git.sr.ht) | 0.102.8 | git hosting: web frontend, GraphQL API, SSH shell, HTTP clone, update hook |
 | [meta.sr.ht](https://git.sr.ht/~sircmpwn/meta.sr.ht) | 0.88.9 | accounts, authentication, SSH/PGP keys, webhook delivery |
+| [builds.sr.ht](https://git.sr.ht/~sircmpwn/builds.sr.ht) | 0.105.6 | CI: web frontend, GraphQL API, SSH shell, build worker (container backend, no KVM required) |
 | [core.sr.ht](https://git.sr.ht/~sircmpwn/core.sr.ht) | 0.84.10 | shared `srht` Python modules, assets, `sr.ht-keygen` |
 | [scm.sr.ht](https://git.sr.ht/~sircmpwn/scm.sr.ht) | 0.22.30 | shared VCS code used by git.sr.ht |
 | [sourcehut-ssh](https://git.sr.ht/~sircmpwn/sourcehut-ssh) | 0.6.0 | unified SSH dispatcher (sshd `AuthorizedKeysCommand`) |
@@ -74,11 +75,18 @@ what the redis URLs are used for.
 | Output | Description |
 |---|---|
 | `nixosModules.default` / `nixosModules.sourcehut` | the `services.srht` NixOS module |
-| `overlays.default` | adds `pkgs.sourcehut.{srht,scmsrht,gitsrht,metasrht,sourcehut-ssh,sourcehut-migrate,ariadne-codegen,gqlgen,dataloaden}` |
+| `overlays.default` | adds `pkgs.sourcehut.{srht,scmsrht,gitsrht,metasrht,buildsrht,sourcehut-ssh,sourcehut-migrate,ariadne-codegen,gqlgen,dataloaden}` |
 | `packages.x86_64-linux.*` | the same packages, buildable with `nix build .#gitsrht` etc. |
 
 The NixOS module does not require the overlay; it instantiates the packages
-from the importing configuration's own nixpkgs.
+itself. By default they are built with **this flake's locked nixpkgs** — the
+package set is sensitive to its build toolchain (gqlgen/dataloaden code
+generation breaks across Go minor bumps), and the locked revision is the
+combination it is tested against. Only the SourceHut derivations and their
+Python interpreter come from the pinned set; system tools (openssh, sudo,
+podman, nginx, ...) still use your own nixpkgs. To build the packages
+against your nixpkgs anyway, pass
+`_module.args.sourcehutNixpkgs = pkgs` in your configuration.
 
 > **Namespace:** the options live under `services.srht`, not
 > `services.sourcehut`. nixpkgs keeps `services.sourcehut` as a
@@ -119,12 +127,48 @@ from the importing configuration's own nixpkgs.
 | `manageSshd` | bool | `true` | install `sourcehut-ssh` as sshd's `AuthorizedKeysCommand` (plus `PermitUserEnvironment SRHT_*`). Set to `false` when another module owns that setting and chain the dispatcher yourself |
 | `fcgiwrap.prefork` | int | `4` | preforked fcgiwrap processes for HTTP(S) cloning |
 
+### `services.srht.builds.*` (builds.sr.ht)
+
+| Option | Type | Default | Meaning |
+|---|---|---|---|
+| `enable` | bool | `false` | run `builds.sr.ht` (web), `builds.sr.ht-api`, SSH job access (`connect`/`tail`) |
+| `package` | package | this flake's `buildsrht` | combined package (Python app + Go API/shell/worker + assets) |
+| `user` / `group` | str | `builds` / `builds` | system user; also the SSH login user for job access |
+| `port` | port | `5002` | web frontend port (Gunicorn) |
+| `apiPort` | port | `5102` | GraphQL API port (Go daemon) |
+| `manageSshd` | bool | `true` | install `sourcehut-ssh` when git.sr.ht isn't already managing it |
+
+### `services.srht.builds.worker.*` (container build worker)
+
+Upstream runs build jobs in KVM VMs via QEMU inside a Docker container.
+That requires `/dev/kvm`, which many VPSes do not provide. This module
+instead ships a drop-in replacement for the `controlcmd` contract
+(`images/` in this repo) that boots **podman containers** — optionally
+under the gVisor `runsc` runtime for stronger isolation — while the
+stock upstream `builds.sr.ht-worker` binary orchestrates jobs over SSH
+exactly as it does against VMs. Only Linux images for the host
+architecture are supported, and jobs cannot use docker-in-docker.
+
+| Option | Type | Default | Meaning |
+|---|---|---|---|
+| `enable` | bool | `false` | run `builds.sr.ht-worker` plus the OCI image build unit |
+| `name` | str | `localhost` | runner name; SSH `connect` instructions reach the worker at this host |
+| `workers` | null or int | `null` | concurrent jobs (`-workers`; null = upstream default, # of CPUs) |
+| `images` | path | this repo's `images/` | dir with `control`, per-distro `functions`/`Containerfile` |
+| `buildlogs` | path | `/var/log/builds.sr.ht` | per-job build log directory |
+| `timeout` | str | `45m` | max build duration |
+| `bindAddress` | str | `127.0.0.1:8080` | local job-info HTTP endpoint used by `builds.sr.ht-shell` |
+| `podmanPackage` | package | `pkgs.podman` | podman used by the control command and image builds |
+| `runtime` | null, str or package | `null` | OCI runtime for `podman --runtime`; e.g. `pkgs.gvisor` (or a path to `runsc`) — the store path is pulled into the closure automatically, nothing to install |
+| `runAsRoot` | bool | `true` | run the control command as root via a NOPASSWD sudoers rule (rootful podman), mirroring upstream's doas/sudo model |
+| `buildImages` | bool | `true` | build the OCI images from the Containerfiles before the worker starts |
+
 ### `services.srht.nginx.*`
 
 | Option | Type | Default | Meaning |
 |---|---|---|---|
 | `enable` | bool | `true` | generate the virtual hosts described below; set to `false` to write them (or another reverse proxy) yourself |
-| `virtualHost` | nginx vhost options | `{}` | merged into the virtual hosts generated for `meta.<domain>` and `git.<domain>`, typed with the nginx virtual-host options from nixpkgs (so `enableACME`, `sslCertificate`, `locations`, ... are checked), e.g. to set `enableACME = false` or provide `sslCertificate`/`sslCertificateKey` |
+| `virtualHost` | nginx vhost options | `{}` | merged into the virtual hosts generated for `meta.<domain>`, `git.<domain>` and `builds.<domain>`, typed with the nginx virtual-host options from nixpkgs (so `enableACME`, `sslCertificate`, `locations`, ... are checked), e.g. to set `enableACME = false` or provide `sslCertificate`/`sslCertificateKey` |
 
 With `enable` (the default) the module contributes vhost rules (proxy to the
 web/API ports, `/static`, HTTP clone via fcgiwrap, recommended proxy headers
@@ -163,11 +207,13 @@ not exist on NixOS.
 | `"sr.ht".global-domain` | `services.srht.domain` |
 | `"sr.ht".environment` | `production` |
 | `"sr.ht".assets` | combined asset directory (SCSS, static files, SQL schema, migrations) |
-| `"meta.sr.ht".origin` / `"git.sr.ht".origin` | `https://meta.<domain>` / `https://git.<domain>` |
-| `"meta.sr.ht".api-internal-origin` / `"git.sr.ht".api-internal-origin` | `http://127.0.0.1:<apiPort>`; used by frontends and the SSH dispatcher for internal GraphQL calls (external clients keep using `origin`) |
-| `"meta.sr.ht".migrate-on-upgrade`, `"git.sr.ht".migrate-on-upgrade` | `yes` (runs `sourcehut-migrate <service> -a` on boot) |
+| `"meta.sr.ht".origin` / `"git.sr.ht".origin` / `"builds.sr.ht".origin` | `https://meta.<domain>` / `https://git.<domain>` / `https://builds.<domain>` |
+| `"meta.sr.ht".api-internal-origin` / `"git.sr.ht".api-internal-origin` / `"builds.sr.ht".api-internal-origin` | `http://127.0.0.1:<apiPort>`; used by frontends and the SSH dispatcher for internal GraphQL calls (external clients keep using `origin`) |
+| `"meta.sr.ht".migrate-on-upgrade`, `"git.sr.ht".migrate-on-upgrade`, `"builds.sr.ht".migrate-on-upgrade` | `yes` (runs `sourcehut-migrate <service> -a` on boot) |
 | `"git.sr.ht".repos`, `"git.sr.ht".post-update-script`, `"git.sr.ht".shell`, `"git.sr.ht".enable-dispatch` | derived from the options above (SSH dispatch, repo path, update hook) |
 | `"git.sr.ht".outgoing-domain`, `"meta.sr.ht::settings".onboarding-redirect` | https URLs under the instance domain |
+| `"builds.sr.ht".shell`, `"builds.sr.ht".ssh-user`, `"builds.sr.ht".allow-free` | packaged `builds.sr.ht-shell`, the `builds` system user, `yes` (self-hosted; upstream defaults to `no`) |
+| `"builds.sr.ht::worker".{name,images,controlcmd,buildlogs,timeout,bind-address}` | derived from `services.srht.builds.worker.*`; `controlcmd` is the generated sudo-wrapped container control script |
 
 ### Required settings
 
@@ -182,6 +228,8 @@ not exist on NixOS.
 | `"meta.sr.ht".connection-string` / `"git.sr.ht".connection-string` | PostgreSQL connection URL **including credentials**, e.g. `postgresql://meta:password@127.0.0.1/meta.sr.ht?sslmode=disable`. Databases and roles are not created by the module. The Go components default to `sslmode=require`, so add `?sslmode=disable` when connecting over TCP to a server without TLS (or use a Unix socket URL, e.g. `postgresql:///meta.sr.ht?user=meta&host=/run/postgresql`) | your infrastructure |
 | `"sr.ht".redis-host` | Redis-compatible URL for caching/sessions, e.g. `redis://127.0.0.1:6379` (Redis, Valkey, DragonFly, `rediss://`, `unix://`, sentinel lists) | your infrastructure |
 | `"meta.sr.ht".webhooks` | **Celery broker URL** for the meta.sr.ht webhook delivery worker (queue for outgoing webhook events), e.g. `redis://127.0.0.1:6379/1`. Required when `meta.enable` | your infrastructure |
+| `"builds.sr.ht".connection-string` | PostgreSQL connection URL for the `builds.sr.ht` database **including credentials**. Required when `builds.enable` | your infrastructure |
+| `"builds.sr.ht".redis` | **Celery broker URL** for job submissions, shared between the builds.sr.ht master and all workers (give it its own Redis database, e.g. `redis://127.0.0.1:6379/2`). Required when `builds.enable` or `builds.worker.enable` | your infrastructure |
 
 Every listed key is enforced by an assertion, so a missing key fails the
 build with an actionable message instead of a broken runtime service.
@@ -223,6 +271,25 @@ For `git.enable = true`:
   authenticates SSH keys against meta.sr.ht and dispatches to
   `git.sr.ht-shell` / update hooks
 
+For `builds.enable = true`:
+
+- `builds.sr.ht.service` — Gunicorn (`buildsrht.app:app`)
+- `builds.sr.ht-api.service` — `builds.sr.ht-api` Go daemon
+- `sourcehut-migrate-builds.service` — same migration handling as above
+- SSH job access: `ssh builds@<host> connect|tail|logs <job-id>` is
+  dispatched by the same `sourcehut-ssh` AuthorizedKeysCommand to
+  `builds.sr.ht-shell`
+
+For `builds.worker.enable = true`:
+
+- `builds.sr.ht-worker.service` — upstream `builds.sr.ht-worker` running as
+  the `builds` user, driven by the container `control` command via a
+  restricted NOPASSWD sudo rule
+- `builds.sr.ht-images.service` — oneshot that builds the OCI images
+  (`podman build` per `<distro>/<release>/Containerfile`) before the worker
+  starts; disable with `builds.worker.buildImages = false` if you manage
+  images yourself
+
 Database migrations only run when a new package version ships new migration
 files; the first boot initializes from the packaged `schema.sql`.
 
@@ -238,7 +305,10 @@ The module is written to sit next to an existing nginx/PostgreSQL/sshd setup:
   definitions for the same hostnames take precedence
 - multiple `AuthorizedKeysCommand` users: the module fails with an actionable
   assertion instead of silently breaking git over SSH; set
-  `services.srht.git.manageSshd = false` to step aside
+  `services.srht.git.manageSshd = false` to step aside. When git.sr.ht and
+  builds.sr.ht are enabled together, git's dispatcher wins and also serves
+  `builds` logins (the same `sourcehut-ssh` binary dispatches per-user);
+  builds never overrides a foreign `AuthorizedKeysCommand`
 - PostgreSQL and Redis are never configured by this module: you provide the
   connection URLs, it only orders its units after `postgresql.target` when
   the nixpkgs PostgreSQL module is enabled
@@ -252,7 +322,7 @@ Versions and hashes are pinned in `nix/packages/*.nix`. To bump:
 2. refresh the source hash:
    `nix store prefetch-file --unpack --json <tarball-url>` (use the plain,
    non-`--unpack` hash only for PyPI sdist fetches)
-3. For `gitsrht`/`metasrht` also refresh `vendorHash`: set it to
+3. For `gitsrht`/`metasrht`/`buildsrht` also refresh `vendorHash`: set it to
    `lib.fakeHash`, run `nix build .#gitsrht`, and copy the hash from the
    error message. The GraphQL code for the Go APIs is generated inside the
    fixed-output derivation before vendoring, so the hash covers the generated

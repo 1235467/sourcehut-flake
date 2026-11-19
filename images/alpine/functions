@@ -1,0 +1,58 @@
+#!/bin/sh
+default_arch=x86_64
+image="localhost/buildsrht-alpine:$release"
+
+boot() {
+	_boot
+	_wait_boot "$port"
+}
+
+install() {
+	port=$1
+	shift 1
+	guest_ssh -p $port build@localhost sudo apk upgrade -U
+	guest_ssh -p $port build@localhost sudo apk add "$@"
+}
+
+add_repository() {
+	port=$1
+	name=$2
+	src=$3
+	repo=$(echo $src | cut -d' ' -f1)
+	key=$(echo $src | cut -d' ' -f2)
+	keyname=$(echo $src | cut -d' ' -f3)
+	guest_ssh -p $port build@localhost \
+		"curl -fsSL '$key' | sudo tee /etc/apk/keys/'$keyname' >/dev/null"
+	if [ "${name#@}" = "${name}" ]
+	then
+		printf '%s\n' "$repo" \
+			| guest_ssh -p $port build@localhost \
+			"cat - /etc/apk/repositories | sudo tee /etc/apk/repositories.new"
+	else
+		printf '%s %s\n' "$name" "$repo" \
+			| guest_ssh -p $port build@localhost \
+			"cat - /etc/apk/repositories | sudo tee /etc/apk/repositories.new"
+	fi
+	guest_ssh -p $port build@localhost \
+		"sudo mv /etc/apk/repositories.new /etc/apk/repositories"
+}
+
+sanity_check() {
+	echo "Booting..."
+	cmd_boot x86_64 8022 &
+	trap 'cmd_cleanup 8022' EXIT
+	_wait_boot 8022
+	echo "Testing sudo..."
+	guest_ssh -p 8022 build@localhost sudo ls -a
+	echo "Testing networking..."
+	guest_ssh -p 8022 build@localhost curl https://builds.sr.ht
+	echo "Testing apk..."
+	guest_ssh -p 8022 build@localhost sudo apk update
+	guest_ssh -p 8022 build@localhost sudo apk upgrade
+	guest_ssh -p 8022 build@localhost sudo apk add htop
+	echo "Testing git..."
+	guest_ssh -p 8022 build@localhost git --version
+	echo "Testing mercurial..."
+	guest_ssh -p 8022 build@localhost hg --version
+	echo "Everything works!"
+}

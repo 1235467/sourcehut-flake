@@ -1,0 +1,29 @@
+ARG RELEASE=latest
+FROM docker.io/library/archlinux:${RELEASE}
+
+# Guest contract expected by builds.sr.ht workers:
+#   * sshd on port 22, `build` user with an empty password
+#   * NOPASSWD sudo
+#   * bash (build task preamble), git, mercurial, curl
+RUN pacman -Syu --noconfirm --needed \
+		base-devel \
+		bash \
+		curl \
+		git \
+		gnupg \
+		mercurial \
+		openssh \
+		sudo \
+	&& useradd -m -u 1000 -s /bin/bash build \
+	&& usermod -aG wheel build \
+	&& passwd -d build \
+	&& printf '%%wheel ALL=(ALL) NOPASSWD: ALL\n' >> /etc/sudoers \
+	&& ssh-keygen -A \
+	&& mkdir -p /run/sshd \
+	&& printf 'PermitEmptyPasswords yes\n' >> /etc/ssh/sshd_config \
+	&& printf '[user]\n\tname = builds.sr.ht\n\temail = builds@sr.ht\n' \
+		> /home/build/.gitconfig \
+	&& chown build:build /home/build/.gitconfig
+
+EXPOSE 22
+CMD ["/usr/sbin/sshd", "-D", "-e"]

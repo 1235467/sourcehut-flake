@@ -25,6 +25,15 @@ let
       gqlgen
       ;
   };
+  buildsrht = py.callPackage ./buildsrht.nix {
+    inherit
+      srht
+      metasrht
+      ariadne-codegen
+      dataloaden
+      gqlgen
+      ;
+  };
   sourcehut-ssh = pkgs.callPackage ./sourcehut-ssh.nix { };
   sourcehut-migrate = pkgs.callPackage ./sourcehut-migrate.nix { };
 in
@@ -34,6 +43,7 @@ in
     scmsrht
     gitsrht
     metasrht
+    buildsrht
     sourcehut-ssh
     sourcehut-migrate
     ariadne-codegen

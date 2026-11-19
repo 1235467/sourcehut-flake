@@ -1,0 +1,47 @@
+#!/bin/sh
+default_arch=x86_64
+image="localhost/buildsrht-archlinux:$release"
+
+boot() {
+	_boot
+	_wait_boot "$port"
+}
+
+install() {
+	port=$1
+	shift 1
+	guest_ssh -p $port build@localhost \
+		"sudo pacman --noconfirm -Syu $(echo "$@" | sed -e 's/ / --needed /g')"
+}
+
+add_repository() {
+	port=$1
+	name=$2
+	src=$3
+	repo=$(echo $src | cut -d'#' -f1)
+	key=$(echo $src | cut -d'#' -f2)
+	printf '[%s]\nServer = %s\n' "$name" "$repo" \
+		| guest_ssh -p $port build@localhost sudo tee -a /etc/pacman.conf
+	guest_ssh -p $port build@localhost sudo pacman-key -r $key
+	guest_ssh -p $port build@localhost sudo pacman-key --lsign-key $key
+	guest_ssh -p $port build@localhost sudo pacman -Sy
+}
+
+sanity_check() {
+	echo "Booting..."
+	cmd_boot x86_64 8022 &
+	trap 'cmd_cleanup 8022' EXIT
+	_wait_boot 8022
+	echo "Testing sudo..."
+	guest_ssh -p 8022 build@localhost sudo ls -a
+	echo "Testing networking..."
+	guest_ssh -p 8022 build@localhost curl https://builds.sr.ht
+	echo "Testing pacman..."
+	guest_ssh -p 8022 build@localhost sudo pacman -Syu --noconfirm
+	guest_ssh -p 8022 build@localhost sudo pacman -S --noconfirm htop
+	echo "Testing git..."
+	guest_ssh -p 8022 build@localhost git --version
+	echo "Testing mercurial..."
+	guest_ssh -p 8022 build@localhost hg --version
+	echo "Everything works!"
+}

@@ -1,18 +1,21 @@
 # Preparation
 
 The NixOS module automates the mechanical parts of a SourceHut deployment:
-it renders `/etc/sr.ht/config.ini`, creates the `git`/`meta` users, runs the
-web/API/webhook/periodic units, initializes and migrates the databases, wires
-`sourcehut-ssh` into sshd, and contributes nginx virtual-host rules. Everything
-below is **not** managed by the module and must be prepared by you, following
-the upstream documentation ([general](https://man.sr.ht/installation.md),
+it renders `/etc/sr.ht/config.ini`, creates the `git`/`meta`/`builds` users,
+runs the web/API/webhook/periodic units, initializes and migrates the
+databases, wires `sourcehut-ssh` into sshd, and contributes nginx
+virtual-host rules. Everything below is **not** managed by the module and
+must be prepared by you, following the upstream documentation
+([general](https://man.sr.ht/installation.md),
 [meta.sr.ht](https://man.sr.ht/meta.sr.ht/installation.md),
-[git.sr.ht](https://man.sr.ht/git.sr.ht/installation.md)).
+[git.sr.ht](https://man.sr.ht/git.sr.ht/installation.md),
+[builds.sr.ht](https://man.sr.ht/builds.sr.ht/installation.md)).
 
 ## 1. DNS and TLS
 
-Create `A`/`AAAA` records for `meta.<domain>` and `git.<domain>` (the generated
-virtual hosts and the default ones derive from `services.srht.domain`).
+Create `A`/`AAAA` records for `meta.<domain>`, `git.<domain>` and, if the CI
+service is enabled, `builds.<domain>` (the generated virtual hosts and the
+default origins derive from `services.srht.domain`).
 
 The generated vhosts default to `forceSSL` + `enableACME`, so either set:
 
@@ -28,17 +31,19 @@ or override with your own certificates via
 
 Upstream requires, per service, "a PostgreSQL database and a user with
 ownership and all necessary permissions that apply to its database". The
-databases are `meta.sr.ht` and `git.sr.ht`; the users are `meta` and `git`.
+databases are `meta.sr.ht`, `git.sr.ht` and `builds.sr.ht`; the users are
+`meta`, `git` and `builds`.
 
 ### NixOS-managed PostgreSQL
 
 ```nix
 services.postgresql = {
   enable = true;
-  ensureDatabases = [ "meta.sr.ht" "git.sr.ht" ];
+  ensureDatabases = [ "meta.sr.ht" "git.sr.ht" "builds.sr.ht" ];
   ensureUsers = [
     { name = "meta"; ensureDBOwnership = false; }
     { name = "git"; ensureDBOwnership = false; }
+    { name = "builds"; ensureDBOwnership = false; }
   ];
 };
 
@@ -47,6 +52,7 @@ services.postgresql = {
 systemd.services.postgresql-setup.postStart = ''
   psql -tAc 'ALTER DATABASE "meta.sr.ht" OWNER TO "meta";'
   psql -tAc 'ALTER DATABASE "git.sr.ht" OWNER TO "git";'
+  psql -tAc 'ALTER DATABASE "builds.sr.ht" OWNER TO "builds";'
 '';
 ```
 
@@ -57,6 +63,7 @@ and need no password:
 services.srht.settings = {
   "meta.sr.ht".connection-string = "postgresql:///meta.sr.ht?user=meta&host=/run/postgresql";
   "git.sr.ht".connection-string = "postgresql:///git.sr.ht?user=git&host=/run/postgresql";
+  "builds.sr.ht".connection-string = "postgresql:///builds.sr.ht?user=builds&host=/run/postgresql";
 };
 ```
 
@@ -67,6 +74,8 @@ CREATE ROLE meta LOGIN PASSWORD '…';
 CREATE DATABASE "meta.sr.ht" OWNER meta;
 CREATE ROLE git LOGIN PASSWORD '…';
 CREATE DATABASE "git.sr.ht" OWNER git;
+CREATE ROLE builds LOGIN PASSWORD '…';
+CREATE DATABASE "builds.sr.ht" OWNER builds;
 ```
 
 then point the module at it, e.g.
@@ -102,6 +111,7 @@ DragonFly, a remote instance, ...). Two settings use it:
 |---|---|
 | `settings."sr.ht".redis-host` | caching and sessions (upstream example uses database `0`) |
 | `settings."meta.sr.ht".webhooks` | Celery broker for outgoing webhook deliveries (give it its own database, upstream example uses `1`) |
+| `settings."builds.sr.ht".redis` | Celery broker for job submissions between the master and workers (give it its own database, e.g. `2`). Must be reachable by **every** worker, not just the master |
 
 Accepted URL forms: `redis://host:port/db`, `rediss://…` for TLS, passwords as
 `redis://:password@host:port/db`; `redis-host` also accepts `unix://` sockets
@@ -122,6 +132,7 @@ services.redis.servers.sourcehut = {
 services.srht.settings = {
   "sr.ht".redis-host = "redis://127.0.0.1:6380/0";
   "meta.sr.ht".webhooks = "redis://127.0.0.1:6380/1";
+  "builds.sr.ht".redis = "redis://127.0.0.1:6380/2";
 };
 ```
 
@@ -212,23 +223,75 @@ If another module already owns `AuthorizedKeysCommand`, set
 `services.srht.git.manageSshd = false` and chain
 `sourcehut-ssh "%u" "%h" "%t" "%k"` yourself.
 
-## 8. Backup checklist
+With builds.sr.ht enabled, the same `AuthorizedKeysCommand` additionally
+dispatches logins for the `builds` system user to `builds.sr.ht-shell`,
+which provides `ssh builds@<host> connect|tail|logs <job-id>` access to
+running jobs on this host's worker (`services.srht.builds.worker.name` is
+the runner name those SSH sessions land on). If a different module owns
+`AuthorizedKeysCommand`, set `services.srht.builds.manageSshd = false` and
+chain `sourcehut-ssh` yourself; when git.sr.ht already manages it, builds
+logins work without further configuration.
 
-- PostgreSQL dumps of `meta.sr.ht` and `git.sr.ht`
+## 8. builds.sr.ht worker (container backend, no KVM)
+
+Upstream's worker boots KVM virtual machines through a Docker container
+running QEMU — it requires `/dev/kvm`. This flake's worker uses the same
+upstream `builds.sr.ht-worker` binary, but replaces the `controlcmd` image
+contract with podman containers (`images/` in this repository), so it runs
+on hosts without nested virtualization. Practical consequences:
+
+- only Linux build images for the host architecture are available
+  (alpine `edge`/`latest`/`3.24`, archlinux `latest` ship in `images/`;
+  add a `<distro>/<release>/` directory with a `functions` symlink and a
+  `Containerfile` to extend)
+- jobs cannot use docker-in-docker
+- container isolation is weaker than KVM: for untrusted build submissions,
+  run the worker on a dedicated machine and/or set
+  `services.srht.builds.worker.runtime = pkgs.gvisor`, which runs containers
+  under gVisor's userspace kernel without needing KVM. The module embeds
+  the store path into the worker configuration, so the runtime is pulled
+  into the system closure automatically — nothing needs to be installed
+
+The worker runs unprivileged as the `builds` user; container lifecycle
+commands go through a NOPASSWD sudo rule that only permits the generated
+control wrapper (rootful podman). OCI images are (re)built from the
+Containerfiles by `builds.sr.ht-images.service` before the worker starts —
+the first run takes a few minutes per image; set
+`services.srht.builds.worker.buildImages = false` to manage them yourself.
+
+The worker needs:
+
+- the same `"builds.sr.ht".redis` Celery broker URL as the master (it is
+  where jobs are submitted)
+- `"builds.sr.ht".connection-string` pointing at the shared PostgreSQL
+  database
+- the shared `"sr.ht".network-key` and `"webhooks".private-key`
+
+A worker on a separate host can enable just
+`services.srht.builds.worker.enable` plus those settings; the nginx/web
+options are master-side only.
+
+## 9. Backup checklist
+
+- PostgreSQL dumps of `meta.sr.ht`, `git.sr.ht` and `builds.sr.ht`
 - `services.srht.git.repos` (the repositories)
+- `services.srht.builds.worker.buildlogs` (build logs, default
+  `/var/log/builds.sr.ht`), if you want to keep them
 - the three secret keys (without them, sessions and webhook signatures cannot
   be restored)
 - object storage buckets, if used
 
 The Redis-compatible backend does **not** need to be backed up: it only holds
-caches, the webhook-signature nonce store and the Celery webhook queue. Losing
-it costs a re-login and possibly some in-flight webhook deliveries, nothing
-permanent.
+caches, the webhook-signature nonce store, the Celery webhook queue and the
+builds job queue. Losing it costs a re-login, some in-flight webhook
+deliveries and queued build jobs, nothing permanent.
 
 ## Upstream references
 
 - <https://man.sr.ht/installation.md> — general installation and prerequisites
 - <https://man.sr.ht/meta.sr.ht/installation.md> — daemons, cronjobs, users
 - <https://man.sr.ht/git.sr.ht/installation.md> — daemons, repository storage, SSH dispatch, HTTP cloning
+- <https://man.sr.ht/builds.sr.ht/installation.md> — master/worker setup, job submission
 - <https://git.sr.ht/~sircmpwn/git.sr.ht/tree/master/item/config.example.ini>
 - <https://git.sr.ht/~sircmpwn/meta.sr.ht/tree/master/item/config.example.ini>
+- <https://git.sr.ht/~sircmpwn/builds.sr.ht/tree/master/item/config.example.ini>

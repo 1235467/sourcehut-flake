@@ -11,6 +11,17 @@
       ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
       scope = pkgs: import ./nix/packages { inherit pkgs; };
+      # Wrapper that builds the sourcehut packages with this flake's
+      # locked nixpkgs instead of the consumer's — the package set is
+      # sensitive to its build toolchain (see nix/modules/sourcehut.nix).
+      # Importing ./nix/modules/sourcehut.nix directly still works: it
+      # falls back to the revision pinned in flake.lock.
+      sourcehutModule =
+        { pkgs, ... }:
+        {
+          _module.args.sourcehutNixpkgs = nixpkgs.legacyPackages.${pkgs.stdenv.hostPlatform.system};
+          imports = [ ./nix/modules/sourcehut.nix ];
+        };
     in
     {
       packages = forAllSystems (
@@ -25,7 +36,7 @@
         sourcehut = scope final;
       };
 
-      nixosModules.default = ./nix/modules/sourcehut.nix;
-      nixosModules.sourcehut = ./nix/modules/sourcehut.nix;
+      nixosModules.sourcehut = sourcehutModule;
+      nixosModules.default = sourcehutModule;
     };
 }

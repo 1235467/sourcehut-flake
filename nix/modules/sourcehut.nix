@@ -9,6 +9,7 @@
 let
   inherit (lib)
     concatMapStringsSep
+    literalExpression
     mkDefault
     mkEnableOption
     mkIf
@@ -22,7 +23,37 @@ let
 
   cfg = config.services.srht;
 
-  sourcehutPkgs = import ../packages { inherit pkgs; };
+  # The sourcehut package set is sensitive to its build toolchain (Go
+  # code generation via gqlgen/dataloaden, Python dependencies), and the
+  # nixpkgs revision pinned in flake.lock is the combination it is tested
+  # against — building it with whatever nixpkgs the consumer happens to
+  # run breaks when the toolchain drifts (e.g. a Go minor bump breaking
+  # gqlgen). SourceHut derivations are therefore built with the pinned
+  # package set; everything else (system tools like openssh/sudo/podman,
+  # nginx, option types) still uses the host pkgs.
+  lockedNixpkgs =
+    let
+      l = (builtins.fromJSON (builtins.readFile ../../flake.lock)).nodes.nixpkgs.locked;
+    in
+    builtins.fetchTarball {
+      url = "https://github.com/${l.owner}/${l.repo}/archive/${l.rev}.tar.gz";
+      sha256 = l.narHash;
+    };
+
+  # `_module.args` is read through `config` (not a function argument with
+  # a default) because the module system treats unprovided signature
+  # arguments as hard errors on recent nixpkgs. This flake's nixosModules
+  # output injects `_module.args.sourcehutNixpkgs` with its locked nixpkgs
+  # input; importing the module file directly falls back to fetching the
+  # pinned revision, and consumers can pass `_module.args.sourcehutNixpkgs
+  # = pkgs` themselves to build against the host package set.
+  sourcehutPkgs' =
+    if config._module.args ? sourcehutNixpkgs then
+      config._module.args.sourcehutNixpkgs
+    else
+      import lockedNixpkgs { system = pkgs.stdenv.hostPlatform.system; };
+
+  sourcehutPkgs = import ../packages { pkgs = sourcehutPkgs'; };
 
   domain = if cfg.domain != null then cfg.domain else config.networking.domain;
 
@@ -80,7 +111,9 @@ let
     lib.mapAttrs (_: lib.filterAttrs (_: v: v != null)) cfg.settings
   );
 
-  python = pkgs.python3.withPackages (
+  # The interpreter must come from the same package set as the sourcehut
+  # Python packages it loads (gunicorn/celery included).
+  python = sourcehutPkgs'.python3.withPackages (
     ps:
     [
       sourcehutPkgs.srht
@@ -88,6 +121,7 @@ let
     ]
     ++ optional cfg.meta.enable sourcehutPkgs.metasrht.python
     ++ optional cfg.git.enable sourcehutPkgs.gitsrht.python
+    ++ optional cfg.builds.enable sourcehutPkgs.buildsrht.python
     ++ optional cfg.meta.enable ps.celery
   );
 
@@ -107,14 +141,51 @@ let
     + lib.optionalString cfg.git.enable ''
       cp -rs --no-preserve=mode ${sourcehutPkgs.gitsrht}/share/sourcehut/. $out/
     ''
+    + lib.optionalString cfg.builds.enable ''
+      cp -rs --no-preserve=mode ${sourcehutPkgs.buildsrht}/share/sourcehut/. $out/
+    ''
     + ''
-      printf 'core.sr.ht %s\ngit.sr.ht %s\nmeta.sr.ht %s\n' \
+      printf 'core.sr.ht %s\ngit.sr.ht %s\nmeta.sr.ht %s\nbuilds.sr.ht %s\n' \
         "${sourcehutPkgs.srht.version}" \
         "${sourcehutPkgs.gitsrht.python.version}" \
         "${sourcehutPkgs.metasrht.python.version}" \
+        "${sourcehutPkgs.buildsrht.python.version}" \
         > $out/versions
     ''
   );
+
+  # The images dir plus a generated config.sh pointing the control script
+  # at the packaged podman and the configured OCI runtime.
+  workerImages = pkgs.runCommand "buildsrht-worker-images" { } ''
+    cp -rs --no-preserve=mode ${cfg.builds.worker.images}/. $out/
+    cat > $out/config.sh <<EOF
+    podman=${cfg.builds.worker.podmanPackage}/bin/podman
+    ${lib.optionalString (cfg.builds.worker.runtime != null) "runtime=${cfg.builds.worker.runtime}"}
+    EOF
+  '';
+
+  # Invoked by the worker as `controlcmd <image> <action> ...`; pins PATH so
+  # that ssh and the coreutils used by the image functions are available no
+  # matter what environment the worker (or sudo) provides.
+  controlWrapper = pkgs.writeShellScript "builds.sr.ht-control" ''
+    export PATH=${
+      lib.makeBinPath [
+        pkgs.openssh
+        pkgs.coreutils
+        pkgs.gnused
+        pkgs.gawk
+      ]
+    }
+    exec ${workerImages}/control "$@"
+  '';
+
+  # sudo in the store is not setuid; the setuid wrapper lives in
+  # security.wrapperDir (/run/wrappers/bin by default).
+  controlCmd =
+    if cfg.builds.worker.runAsRoot then
+      "${config.security.wrapperDir}/sudo -n ${controlWrapper}"
+    else
+      "${controlWrapper}";
 
   # OpenSSH's safe_path rejects AuthorizedKeysCommand paths below
   # group-writable directories; /nix/store (mode 1775) is rejected, so the
@@ -351,6 +422,82 @@ in
             default = { };
           };
 
+          "builds.sr.ht" = mkOption {
+            type = mkIniSection {
+              api-internal-origin = mkIniOption {
+                description = "Address the GraphQL API is reached at internally (frontends, SSH dispatcher, ...). Defaults to the loopback API port; `origin` is used when unset.";
+                example = "http://127.0.0.1:5102";
+              };
+              connection-string = mkIniOption {
+                description = "PostgreSQL connection URL for builds.sr.ht, including credentials. Databases are not managed by this module. Required.";
+                example = "postgresql://builds:password@127.0.0.1/builds.sr.ht";
+              };
+              redis = mkIniOption {
+                description = "Celery broker URL shared between the builds.sr.ht master and all workers; carries job submissions. Required.";
+                example = "redis://127.0.0.1:6379/2";
+              };
+              origin = mkIniOption {
+                description = "URL builds.sr.ht is served at; defaults to `https://builds.<domain>`.";
+                example = "https://builds.example.com";
+              };
+              allow-free = mkIniOption {
+                description = "Whether users without a paid account may submit builds. Defaults to `yes` on this module (upstream defaults to `no`).";
+                example = "yes";
+              };
+              shell = mkIniOption {
+                description = "Shell dispatched to for authenticated SSH sessions (`connect`/`tail` for build jobs); set from the packaged builds.sr.ht.";
+              };
+              ssh-user = mkIniOption {
+                description = "The user to associate with this service when dispatching incoming SSH connections; set from {option}`services.srht.builds.user`.";
+              };
+              enable-dispatch = mkIniOption {
+                description = "Whether this service is handled by the unified SSH dispatcher (`sourcehut-ssh`).";
+                example = true;
+              };
+              migrate-on-upgrade = mkIniOption {
+                description = "Whether database migrations are applied on boot (`sourcehut-migrate -a`).";
+                example = "yes";
+              };
+            };
+            default = { };
+          };
+
+          "builds.sr.ht::api" = mkOption {
+            type = mkIniSection {
+              internal-ipnet = mkIniOption {
+                description = "Subnets permitted to use internal API authentication.";
+                example = "127.0.0.0/8,::1/128";
+              };
+            };
+            default = { };
+          };
+
+          "builds.sr.ht::worker" = mkOption {
+            type = mkIniSection {
+              name = mkIniOption {
+                description = "Name of this build runner (hostname workers are reached at for SSH job access); set from {option}`services.srht.builds.worker.name`.";
+              };
+              buildlogs = mkIniOption {
+                description = "Path to write build logs; set from {option}`services.srht.builds.worker.buildlogs`.";
+              };
+              images = mkIniOption {
+                description = "Path to the build images directory; set from {option}`services.srht.builds.worker.images`.";
+              };
+              controlcmd = mkIniOption {
+                description = "Command used to boot/inspect/teardown build environments; set from {option}`services.srht.builds.worker` options.";
+              };
+              timeout = mkIniOption {
+                description = "Maximum build duration (Go `time.ParseDuration` format); set from {option}`services.srht.builds.worker.timeout`.";
+                example = "45m";
+              };
+              bind-address = mkIniOption {
+                description = "HTTP bind address for local build information used by `builds.sr.ht-shell`; set from {option}`services.srht.builds.worker.bindAddress`.";
+                example = "127.0.0.1:8080";
+              };
+            };
+            default = { };
+          };
+
           "mail" = mkOption {
             type = mkIniSection {
               smtp-host = mkIniOption {
@@ -528,6 +675,161 @@ in
       };
     };
 
+    builds = {
+      enable = mkEnableOption "builds.sr.ht, the continuous integration service";
+
+      package = mkPackageOption sourcehutPkgs "buildsrht" { };
+
+      user = mkOption {
+        type = types.str;
+        default = "builds";
+        description = ''
+          User for builds.sr.ht, also used for SSH access to running build
+          jobs (`ssh builds@<host> connect <job>`).
+        '';
+      };
+
+      group = mkOption {
+        type = types.str;
+        default = "builds";
+        description = "Group for builds.sr.ht.";
+      };
+
+      port = mkOption {
+        type = types.port;
+        default = 5002;
+        description = "Port the builds.sr.ht web service listens on.";
+      };
+
+      apiPort = mkOption {
+        type = types.port;
+        default = 5102;
+        description = ''
+          Port the builds.sr.ht API listens on. Used by the generated nginx
+          `/query` location and by the default internal API origin
+          ({option}`services.srht.settings."builds.sr.ht".api-internal-origin`).
+        '';
+      };
+
+      manageSshd = mkOption {
+        type = types.bool;
+        default = true;
+        description = ''
+          Whether to configure sshd's AuthorizedKeysCommand for SourceHut's
+          SSH dispatcher (required for `ssh builds@<host> connect <job>`).
+          Only takes effect when git.sr.ht is not already managing it; the
+          dispatcher is global. Disable when AuthorizedKeysCommand is
+          managed elsewhere and needs to be chained manually.
+        '';
+      };
+
+      worker = {
+        enable = mkEnableOption ''
+          the builds.sr.ht build worker
+
+          This module ships a container-based image control backend
+          (podman, optionally with the gVisor `runsc` runtime) instead of
+          upstream's QEMU/KVM setup, so builds work on hosts without
+          /dev/kvm. Only Linux images for the host architecture are
+          supported.
+        '';
+
+        name = mkOption {
+          type = types.str;
+          default = "localhost";
+          description = ''
+            Name of this build runner; build job SSH instructions and the
+            `connect` command use it to reach the worker. For a co-located
+            master+worker `localhost` is fine; for a remote worker set its
+            reachable hostname.
+          '';
+        };
+
+        workers = mkOption {
+          type = types.nullOr types.ints.positive;
+          default = null;
+          description = ''
+            Number of concurrent build jobs (`-workers` flag). Null uses
+            the upstream default (number of CPUs).
+          '';
+        };
+
+        images = mkOption {
+          type = types.path;
+          default = ../../images;
+          description = ''
+            Directory with the image definitions used by the worker's
+            control command: `control`, a `functions` file and a
+            `Containerfile` per distro (with `<distro>/<release>`
+            subdirectories). Defaults to the container-based image
+            definitions packaged with this flake.
+          '';
+        };
+
+        buildlogs = mkOption {
+          type = types.path;
+          default = "/var/log/builds.sr.ht";
+          description = "Directory the worker writes per-job build logs to.";
+        };
+
+        timeout = mkOption {
+          type = types.str;
+          default = "45m";
+          description = "Maximum build duration (Go `time.ParseDuration` format).";
+        };
+
+        bindAddress = mkOption {
+          type = types.str;
+          default = "127.0.0.1:8080";
+          description = ''
+            HTTP bind address for local job information; `builds.sr.ht-shell`
+            queries it for `connect`/`tail`.
+          '';
+        };
+
+        podmanPackage = mkPackageOption pkgs "podman" { };
+
+        runtime = mkOption {
+          type = types.nullOr (types.coercedTo types.package (p: "${p}/bin/runsc") types.str);
+          default = null;
+          example = literalExpression "pkgs.gvisor";
+          description = ''
+            OCI runtime passed to `podman --runtime`: either a path to the
+            runtime binary or a package providing `bin/runsc`, e.g.
+            `pkgs.gvisor` for gVisor (stronger isolation without nested
+            virtualization). The path is embedded into the worker's
+            generated image configuration, so the runtime is pulled into
+            the system closure automatically — nothing needs to be
+            installed separately. Null uses podman's default runtime
+            (crun).
+          '';
+        };
+
+        runAsRoot = mkOption {
+          type = types.bool;
+          default = true;
+          description = ''
+            Run the image control command as root via sudo (rootful podman),
+            the same model upstream uses for its docker-based control
+            command. The module installs a NOPASSWD sudoers rule restricted
+            to the control wrapper. Set to false if the control command
+            needs no elevated privileges (e.g. rootless podman or a custom
+            images dir).
+          '';
+        };
+
+        buildImages = mkOption {
+          type = types.bool;
+          default = true;
+          description = ''
+            Build the OCI images from the Containerfiles in
+            {option}`services.srht.builds.worker.images` in a oneshot unit
+            before the worker starts.
+          '';
+        };
+      };
+    };
+
     nginx = {
       enable = mkEnableOption ''
         automatic generation of nginx virtual hosts for the enabled services
@@ -671,6 +973,34 @@ in
           '';
         }
         {
+          assertion = !cfg.builds.enable || cfg.settings."builds.sr.ht".connection-string != null;
+          message = ''
+            services.srht.settings."builds.sr.ht".connection-string must be set
+            to the PostgreSQL connection URL of the builds.sr.ht database,
+            including credentials, for example
+            "postgresql://builds:password@127.0.0.1/builds.sr.ht".
+          '';
+        }
+        {
+          assertion = !cfg.builds.enable || cfg.settings."builds.sr.ht".redis != null;
+          message = ''
+            services.srht.settings."builds.sr.ht".redis must be set to the
+            Celery broker URL shared between the builds.sr.ht master and all
+            workers, for example "redis://127.0.0.1:6379/2".
+          '';
+        }
+        {
+          assertion =
+            !(cfg.builds.enable && cfg.builds.manageSshd)
+            || config.services.openssh.authorizedKeysCommand == sshCommand;
+          message = ''
+            Another module has configured services.openssh.authorizedKeysCommand,
+            so SourceHut's SSH dispatcher cannot be installed.
+            Set services.srht.builds.manageSshd = false and chain the dispatcher
+            (${sourcehutPkgs.sourcehut-ssh}/bin/sourcehut-ssh) manually.
+          '';
+        }
+        {
           assertion = !cfg.meta.enable || cfg.settings."meta.sr.ht".webhooks != null;
           message = ''
             services.srht.settings."meta.sr.ht".webhooks must be set to the
@@ -705,9 +1035,13 @@ in
         (mkIf cfg.git.enable {
           "git.sr.ht".api-internal-origin = mkDefault "http://127.0.0.1:${toString cfg.git.apiPort}";
         })
+        (mkIf cfg.builds.enable {
+          "builds.sr.ht".api-internal-origin = mkDefault "http://127.0.0.1:${toString cfg.builds.apiPort}";
+        })
         (optionalAttrs (domain != null) {
           "meta.sr.ht".origin = mkDefault "https://meta.${domain}";
           "git.sr.ht".origin = mkDefault "https://git.${domain}";
+          "builds.sr.ht".origin = mkDefault "https://builds.${domain}";
           "git.sr.ht".outgoing-domain = mkDefault "https://git.${domain}";
           "meta.sr.ht::settings".onboarding-redirect = mkDefault "https://meta.${domain}";
         })
@@ -969,13 +1303,201 @@ in
       }
     ]))
 
-    (mkIf (cfg.nginx.enable && (cfg.meta.enable || cfg.git.enable)) {
+    (mkIf cfg.builds.enable (mkMerge [
+      {
+        users.users.${cfg.builds.user} = {
+          isSystemUser = mkDefault true;
+          group = mkDefault cfg.builds.group;
+          home = mkDefault "/var/lib/sourcehut/builds.sr.ht";
+          description = mkDefault "builds.sr.ht service user";
+          # sshd runs the SSH dispatch through the user's login shell.
+          useDefaultShell = mkDefault true;
+        };
+
+        users.groups.${cfg.builds.group} = { };
+
+        systemd.tmpfiles.rules = [
+          "d ${cfg.builds.worker.buildlogs} 0755 ${cfg.builds.user} ${cfg.builds.group} -"
+        ];
+
+        services.srht.settings = mkMerge [
+          {
+            "builds.sr.ht" = {
+              migrate-on-upgrade = mkDefault "yes";
+              enable-dispatch = mkDefault true;
+              ssh-user = mkDefault cfg.builds.user;
+              shell = mkDefault "${cfg.builds.package}/bin/builds.sr.ht-shell";
+              # Upstream defaults to "no"; on a self-hosted instance users
+              # should be able to submit builds out of the box.
+              allow-free = mkDefault "yes";
+            };
+            "builds.sr.ht::api".internal-ipnet = mkDefault "127.0.0.0/8,::1/128";
+          }
+          (mkIf cfg.builds.worker.enable {
+            "builds.sr.ht::worker" = {
+              name = mkDefault cfg.builds.worker.name;
+              buildlogs = mkDefault cfg.builds.worker.buildlogs;
+              images = mkDefault "${workerImages}";
+              controlcmd = mkDefault controlCmd;
+              timeout = mkDefault cfg.builds.worker.timeout;
+              bind-address = mkDefault cfg.builds.worker.bindAddress;
+            };
+          })
+        ];
+
+        systemd.services."sourcehut-migrate-builds" = {
+          description = "builds.sr.ht database initialization and migration";
+
+          wantedBy = [ "multi-user.target" ];
+          before = [
+            "builds.sr.ht.service"
+            "builds.sr.ht-api.service"
+            "builds.sr.ht-worker.service"
+          ];
+          after = optional config.services.postgresql.enable "postgresql.target";
+          requires = optional config.services.postgresql.enable "postgresql.target";
+
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+            User = cfg.builds.user;
+            Group = cfg.builds.group;
+            StateDirectory = "sourcehut/builds.sr.ht";
+          };
+
+          script = ''
+            state=/var/lib/sourcehut/builds.sr.ht
+            if [ ! -e "$state/db-initialized" ]; then
+              ${sourcehutPkgs.sourcehut-migrate}/bin/sourcehut-migrate builds.sr.ht init
+              touch "$state/db-initialized"
+            fi
+            ${sourcehutPkgs.sourcehut-migrate}/bin/sourcehut-migrate -a builds.sr.ht
+          '';
+        };
+
+        systemd.services."builds.sr.ht" = mkService "builds" {
+          description = "builds.sr.ht web service";
+          wantedBy = [ "multi-user.target" ];
+          requires = optional config.services.postgresql.enable "postgresql.target";
+          serviceConfig = {
+            User = cfg.builds.user;
+            Group = cfg.builds.group;
+            StateDirectory = "sourcehut/builds.sr.ht";
+            ExecStart = "${python}/bin/gunicorn buildsrht.app:app --name builds.sr.ht --bind ${cfg.listenAddress}:${toString cfg.builds.port} --workers 1 --timeout 120 --log-level info";
+          };
+        };
+
+        systemd.services."builds.sr.ht-api" = mkService "builds" {
+          description = "builds.sr.ht API service";
+          wantedBy = [ "multi-user.target" ];
+          requires = optional config.services.postgresql.enable "postgresql.target";
+          serviceConfig = {
+            User = cfg.builds.user;
+            Group = cfg.builds.group;
+            ExecStart = "${cfg.builds.package}/bin/builds.sr.ht-api -b ${cfg.listenAddress}:${toString cfg.builds.apiPort}";
+          };
+        };
+      }
+
+      # SSH dispatch for `ssh builds@<host> connect|tail <job>`: fill the gap
+      # only when git.sr.ht is not already installing the (global) dispatcher.
+      (mkIf (cfg.builds.manageSshd && !(cfg.git.enable && cfg.git.manageSshd)) {
+        services.openssh = {
+          enable = mkDefault true;
+          authorizedKeysCommand = mkDefault sshCommand;
+          authorizedKeysCommandUser = mkDefault "root";
+          settings.PermitUserEnvironment = mkDefault "SRHT_*";
+        };
+
+        environment.etc."ssh/sourcehut/sourcehut-ssh" = {
+          mode = "0755";
+          text = ''
+            #!/bin/sh
+            exec ${sourcehutPkgs.sourcehut-ssh}/bin/sourcehut-ssh "$@"
+          '';
+        };
+      })
+
+      (mkIf cfg.builds.worker.enable {
+        security.sudo.enable = mkDefault true;
+        # The worker runs as an unprivileged user; the control command
+        # (container lifecycle) runs as root, mirroring upstream's
+        # doas/sudo setup for its docker control command.
+        security.sudo.extraRules = [
+          {
+            users = [ cfg.builds.user ];
+            commands = [
+              {
+                command = "${controlWrapper}";
+                options = [ "NOPASSWD" ];
+              }
+            ];
+          }
+        ];
+
+        virtualisation.podman.enable = mkDefault cfg.builds.worker.runAsRoot;
+
+        systemd.services."builds.sr.ht-worker" = {
+          description = "builds.sr.ht build worker (container backend)";
+          wantedBy = [ "multi-user.target" ];
+          after = [
+            "network.target"
+            "sourcehut-migrate-builds.service"
+          ]
+          ++ optional config.services.postgresql.enable "postgresql.target"
+          ++ optional cfg.builds.worker.buildImages "builds.sr.ht-images.service";
+          requires = optional cfg.builds.worker.buildImages "builds.sr.ht-images.service";
+          restartTriggers = [ configFile ];
+          # The worker execs `ssh` for every guest interaction.
+          path = [ pkgs.openssh ];
+          serviceConfig = {
+            Restart = "always";
+            User = cfg.builds.user;
+            Group = cfg.builds.group;
+            ExecStart =
+              "${cfg.builds.package}/bin/builds.sr.ht-worker"
+              + lib.optionalString (cfg.builds.worker.workers != null)
+                " -workers ${toString cfg.builds.worker.workers}";
+          };
+        };
+      })
+
+      (mkIf (cfg.builds.worker.enable && cfg.builds.worker.buildImages) {
+        systemd.services."builds.sr.ht-images" = {
+          description = "build OCI images for the builds.sr.ht worker";
+          after = [ "network.target" ];
+          wantedBy = [ "multi-user.target" ];
+          path = [
+            cfg.builds.worker.podmanPackage
+            pkgs.coreutils
+          ];
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+          };
+          script = ''
+            set -eu
+            for cf in ${workerImages}/*/*/Containerfile; do
+              [ -e "$cf" ] || continue
+              d=$(dirname "$cf")
+              release=$(basename "$d")
+              distro=$(basename "$(dirname "$d")")
+              tag="localhost/buildsrht-$distro:$release"
+              echo "building $tag"
+              podman build --build-arg RELEASE="$release" -t "$tag" -f "$cf" "$d"
+            done
+          '';
+        };
+      })
+    ]))
+
+    (mkIf (cfg.nginx.enable && (cfg.meta.enable || cfg.git.enable || cfg.builds.enable)) {
       services.nginx.virtualHosts = optionalAttrs (domain != null) (
         optionalAttrs cfg.meta.enable {
           "meta.${domain}" = mkMerge ([
             {
               forceSSL = mkDefault true;
-            enableACME = mkDefault true;
+              enableACME = mkDefault true;
               locations."/" = {
                 proxyPass = mkDefault "http://${cfg.listenAddress}:${toString cfg.meta.port}";
                 recommendedProxySettings = mkDefault true;
@@ -1026,6 +1548,28 @@ in
                   fastcgi_max_temp_file_size 512m;
                   include ${pkgs.nginx}/conf/fastcgi_params;
                   gzip off;
+                '';
+              };
+            }
+          ] ++ nginxVhostUserConfig);
+        }
+        // optionalAttrs cfg.builds.enable {
+          "builds.${domain}" = mkMerge ([
+            {
+              forceSSL = mkDefault true;
+              enableACME = mkDefault true;
+              locations."/" = {
+                proxyPass = mkDefault "http://${cfg.listenAddress}:${toString cfg.builds.port}";
+                recommendedProxySettings = mkDefault true;
+              };
+              locations."/query" = {
+                proxyPass = mkDefault "http://${cfg.listenAddress}:${toString cfg.builds.apiPort}";
+                recommendedProxySettings = mkDefault true;
+              };
+              locations."/static" = {
+                root = mkDefault "${assets}";
+                extraConfig = ''
+                  expires 30d;
                 '';
               };
             }
