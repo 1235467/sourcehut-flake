@@ -1,0 +1,53 @@
+ARG RELEASE=latest
+FROM docker.io/nixos/nix:${RELEASE}
+
+# Guest contract expected by builds.sr.ht workers:
+#   * sshd on port 22, `build` user with an empty password
+#   * NOPASSWD sudo
+#   * bash (build task preamble), git, mercurial, curl
+#
+# The guest package set is built declaratively from the committed
+# flake.nix/flake.lock (nix build) — nothing is installed with
+# nix-env or nix profile.
+COPY flake.nix flake.lock /guest/
+
+RUN printf 'experimental-features = nix-command flakes\n' >> /etc/nix/nix.conf \
+	&& mkdir -p /opt \
+	&& nix build /guest#guestEnv -o /opt/guest-env
+
+RUN mkdir -p /usr/bin /usr/sbin /home/build /run/sshd /var/empty /etc/pam.d /etc/ssh \
+	&& ln -sfn /opt/guest-env/bin/* /usr/bin/ \
+	&& ln -sfn /nix/var/nix/profiles/default/bin/* /usr/bin/ \
+	&& ln -sfn /opt/guest-env/bin/sshd /usr/sbin/sshd \
+	&& ln -sfn /opt/guest-env/bin/bash /bin/bash \
+	&& rm -f /usr/bin/sudo \
+	&& install -m4755 /opt/guest-env/bin/sudo /usr/bin/sudo \
+	&& ssh-keygen -A \
+	&& printf 'PermitEmptyPasswords yes\nPermitUserEnvironment yes\n' > /etc/ssh/sshd_config \
+	# nix-env/nix-channel install into ~/.nix-profile; sshd's compiled-in
+	# PATH has no store paths, so seed the login environment explicitly.
+	&& mkdir -p /home/build/.ssh \
+	&& printf 'PATH=/home/build/.nix-profile/bin:/usr/bin:/bin:/usr/sbin:/sbin:/nix/var/nix/profiles/default/bin\n' \
+		> /home/build/.ssh/environment \
+	&& printf 'build:x:1000:1000::/home/build:/bin/bash\n' >> /etc/passwd \
+	&& printf 'sshd:x:74:74::/var/empty:/bin/false\n' >> /etc/passwd \
+	&& printf 'wheel:x:10:build\n' >> /etc/group \
+	&& printf 'build::1::::::\n' >> /etc/shadow \
+	&& printf '%%wheel ALL=(ALL) NOPASSWD: ALL\n' > /etc/sudoers \
+	&& chmod 440 /etc/sudoers \
+	&& printf 'auth sufficient pam_permit.so\naccount required pam_permit.so\nsession required pam_permit.so\npassword required pam_permit.so\n' \
+		> /etc/pam.d/sudo \
+	&& cp /etc/pam.d/sudo /etc/pam.d/sshd \
+	&& printf '[user]\n\tname = builds.sr.ht\n\temail = builds@sr.ht\n' \
+		> /home/build/.gitconfig \
+	&& chown -R 1000:1000 /home/build \
+	# The nixos/nix base is a single-user root install; build jobs run as the
+	# unprivileged `build` user, so expose the store via nix-daemon instead.
+	&& mkdir -p /nix/var/nix/daemon-socket \
+	&& chmod 1777 /nix/var/nix/daemon-socket \
+	&& printf '#!/bin/sh\nmkdir -p /nix/var/nix/daemon-socket\nchmod 1777 /nix/var/nix/daemon-socket\n/usr/bin/nix-daemon --daemon &\nexec /usr/sbin/sshd -D -e\n' \
+		> /entrypoint \
+	&& chmod 755 /entrypoint
+
+EXPOSE 22
+CMD ["/entrypoint"]

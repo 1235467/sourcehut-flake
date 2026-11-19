@@ -1,0 +1,35 @@
+ARG RELEASE=bookworm
+FROM docker.io/library/debian:${RELEASE}
+
+# Guest contract expected by builds.sr.ht workers:
+#   * sshd on port 22, `build` user with an empty password
+#   * NOPASSWD sudo
+#   * bash (build task preamble), git, mercurial, curl
+RUN apt-get update \
+	&& DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+		bash \
+		build-essential \
+		ca-certificates \
+		curl \
+		git \
+		gnupg \
+		mercurial \
+		openssh-server \
+		sudo \
+		tzdata \
+	&& rm -rf /var/lib/apt/lists/* \
+	&& useradd -m -u 1000 -s /bin/bash build \
+	&& usermod -aG sudo build \
+	&& passwd -d build \
+	&& printf '%%sudo ALL=(ALL) NOPASSWD: ALL\n' >> /etc/sudoers \
+	&& mkdir -p /run/sshd \
+	&& ssh-keygen -A \
+	&& printf 'PermitEmptyPasswords yes\n' >> /etc/ssh/sshd_config \
+	# Debian's pam_unix does not accept empty passwords without nullok.
+	&& sed -i 's/pam_unix.so/pam_unix.so nullok/' /etc/pam.d/common-auth \
+	&& printf '[user]\n\tname = builds.sr.ht\n\temail = builds@sr.ht\n' \
+		> /home/build/.gitconfig \
+	&& chown build:build /home/build/.gitconfig
+
+EXPOSE 22
+CMD ["/usr/sbin/sshd", "-D", "-e"]

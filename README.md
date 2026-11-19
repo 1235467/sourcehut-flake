@@ -149,6 +149,15 @@ stock upstream `builds.sr.ht-worker` binary orchestrates jobs over SSH
 exactly as it does against VMs. Only Linux images for the host
 architecture are supported, and jobs cannot use docker-in-docker.
 
+Shipped images: alpine (`edge`/`latest`/`3.24`), archlinux (`latest`),
+debian (`bookworm`/`trixie`/`latest`) and nix (`latest`). Note the nix
+image is `nixos/nix` (generic Linux with Nix installed), **not** NixOS;
+it is flake-built: the guest environment (including `niks3`, sudo,
+openssh, mercurial) comes from a committed `flake.lock` inside the image
+build — flakes are enabled and a `nix-daemon` runs for the `build` user,
+so manifests work like upstream's NixOS VM without any imperative
+`nix-env`/`nix profile` at image build time.
+
 | Option | Type | Default | Meaning |
 |---|---|---|---|
 | `enable` | bool | `false` | run `builds.sr.ht-worker` plus the OCI image build unit |

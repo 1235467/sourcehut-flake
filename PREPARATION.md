@@ -241,9 +241,11 @@ contract with podman containers (`images/` in this repository), so it runs
 on hosts without nested virtualization. Practical consequences:
 
 - only Linux build images for the host architecture are available
-  (alpine `edge`/`latest`/`3.24`, archlinux `latest` ship in `images/`;
+  (alpine `edge`/`latest`/`3.24`, archlinux `latest`, debian
+  `bookworm`/`trixie`/`latest` and nix `latest` ship in `images/`;
   add a `<distro>/<release>/` directory with a `functions` symlink and a
-  `Containerfile` to extend)
+  `Containerfile` to extend). The non-Linux upstream images (freebsd,
+  netbsd, openbsd) cannot be represented as containers
 - jobs cannot use docker-in-docker
 - container isolation is weaker than KVM: for untrusted build submissions,
   run the worker on a dedicated machine and/or set
@@ -251,6 +253,22 @@ on hosts without nested virtualization. Practical consequences:
   under gVisor's userspace kernel without needing KVM. The module embeds
   the store path into the worker configuration, so the runtime is pulled
   into the system closure automatically — nothing needs to be installed
+
+The nix image (`images/nix/latest`) is assembled differently from the
+rest: its guest package set is a `buildEnv` pinned by a committed
+`flake.nix`/`flake.lock` — `podman build` runs `nix build` inside the
+`nixos/nix` base image, so the contents are fully reproducible and nothing
+is installed imperatively with `nix-env`/`nix profile`. Flakes are enabled
+in `nix.conf`, `niks3` ships in the guest env, and the container runs a
+`nix-daemon` beside sshd so the unprivileged `build` user gets full
+`nix`/`nix-shell`/`nix-env` access, matching the upstream NixOS VM's
+manifest contract (`nix-channel`, `nix-env -iA`). Refresh the pinned
+nixpkgs by running `nix flake update` in `images/nix/latest`.
+
+Note this is the `nixos/nix` base image — generic Linux with the Nix
+package manager, not a NixOS system — hence the image is named `nix`,
+not `nixos`. Manifests must use `image: nix/latest`; a true NixOS
+system image may be added later.
 
 The worker runs unprivileged as the `builds` user; container lifecycle
 commands go through a NOPASSWD sudo rule that only permits the generated

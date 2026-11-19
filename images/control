@@ -66,12 +66,14 @@ _boot() {
 	# A previous run killed between boot and cleanup leaves a container
 	# with this name bound to the port; drop it before starting a new one.
 	$podman rm -f "$(container_name)" >/dev/null 2>&1 || true
+	# No explicit command: images carry their own CMD (plain sshd on most,
+	# nixos runs an entrypoint that also spawns nix-daemon).
 	$podman run --detach \
 		${runtime:+--runtime "$runtime"} \
 		--name "$(container_name)" \
 		--publish "127.0.0.1:$port:22" \
 		--rm \
-		"$image" /usr/sbin/sshd -D -e
+		"$image"
 }
 
 # The release of an image is the last component of the image name:

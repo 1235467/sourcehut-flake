@@ -1,0 +1,44 @@
+#!/bin/sh
+default_arch=x86_64
+image="localhost/buildsrht-nix:$release"
+
+boot() {
+	_boot
+	_wait_boot "$port"
+}
+
+install() {
+	port=$1
+	shift 1
+	guest_ssh -p $port build@127.0.0.1 nix-channel --update
+	guest_ssh -p $port build@127.0.0.1 nix-env -iA "$@"
+}
+
+add_repository() {
+	port=$1
+	name=$2
+	src=$3
+	shift 1
+	guest_ssh -p $port build@127.0.0.1 nix-channel --add "${src}" "${name}"
+	# Only update the selected channel, so we don't perform n^2 updates:
+	guest_ssh -p $port build@127.0.0.1 nix-channel --update "${name}"
+}
+
+sanity_check() {
+	echo "Booting..."
+	cmd_boot x86_64 8022 &
+	trap 'cmd_cleanup 8022' EXIT
+	_wait_boot 8022
+	echo "Testing sudo..."
+	guest_ssh -p 8022 build@127.0.0.1 sudo ls -a
+	echo "Testing networking..."
+	guest_ssh -p 8022 build@127.0.0.1 curl https://builds.sr.ht
+	echo "Testing nix..."
+	add_repository 8022 nixpkgs https://nixos.org/channels/nixpkgs-unstable
+	guest_ssh -p 8022 build@127.0.0.1 nix-shell -p hello --run "hello"
+	echo "Testing git..."
+	guest_ssh -p 8022 build@127.0.0.1 git --version
+	echo "Testing mercurial..."
+	guest_ssh -p 8022 build@127.0.0.1 hg --version
+	echo "Everything works!"
+}
