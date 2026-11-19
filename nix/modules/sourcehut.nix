@@ -162,6 +162,8 @@ let
     # path, which buildah refuses to deref from inside a build context
     # (COPY ... lstat: no such file or directory on the target side).
     cp -rL --no-preserve=mode ${cfg.builds.worker.images}/. $out/
+    # --no-preserve=mode strips the execute bit the control wrapper needs
+    chmod +x $out/control
     cat > $out/config.sh <<EOF
     podman=${cfg.builds.worker.podmanPackage}/bin/podman
     ${lib.optionalString (cfg.builds.worker.runtime != null) "runtime=${cfg.builds.worker.runtime}"}
