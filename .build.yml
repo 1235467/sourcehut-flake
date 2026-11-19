@@ -4,6 +4,7 @@ sources:
 secrets:
   - 3a765793-5184-4bc4-aadd-5b391cad8681
   - 8fc13b74-dff8-4f28-965b-a1c066c7ae32
+  - 7bcec59f-e259-452c-bd2c-151f0654c987
 tasks:
   - cache-packages: |
       cd sourcehut-flake
@@ -11,8 +12,9 @@ tasks:
       export NIKS3_AUTH_TOKEN_FILE=$HOME/secrets/niks3-token.txt
       # build is a trusted user in this image, so --extra-* flags are
       # honored without sudo (keeps the suid attack surface closed).
-      # s3 is kept at a lower priority than cache.nixos.org since it
-      # bills per request.
+      # The substituter URL comes from a secret so the public repo does
+      # not expose the cache endpoint; it stays at a lower priority
+      # than cache.nixos.org since it bills per request.
       nix build \
         --extra-substituters "$(cat ~/secrets/niks3-public-url.txt)?priority=50" \
         --extra-trusted-public-keys 'my-cache-1:O2jwJZcCqgv6iMe3pBCDZuK43BSnxfUbZi6y9n7muSY=' \
