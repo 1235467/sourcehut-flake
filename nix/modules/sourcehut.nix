@@ -475,7 +475,7 @@ in
           "builds.sr.ht::worker" = mkOption {
             type = mkIniSection {
               name = mkIniOption {
-                description = "Name of this build runner (hostname workers are reached at for SSH job access); set from {option}`services.srht.builds.worker.name`.";
+                description = "Name of this build runner including HTTP port if not 80 — the API fetches job logs via `http://{name}/...` verbatim; set from {option}`services.srht.builds.worker.name`.";
               };
               buildlogs = mkIniOption {
                 description = "Path to write build logs; set from {option}`services.srht.builds.worker.buildlogs`.";
@@ -736,12 +736,20 @@ in
 
         name = mkOption {
           type = types.str;
-          default = "localhost";
+          # The API builds http://{name}/logs/{job}/log verbatim, so the
+          # name must include the port unless it listens on 80. Default
+          # tracks bindAddress so a co-located master+worker works out of
+          # the box.
+          default =
+            let a = cfg.builds.worker.bindAddress;
+            in if lib.hasPrefix ":" a then "127.0.0.1${a}" else a;
+          defaultText = literalExpression ''"127.0.0.1:8080" (derived from `bindAddress`)'';
           description = ''
-            Name of this build runner; build job SSH instructions and the
-            `connect` command use it to reach the worker. For a co-located
-            master+worker `localhost` is fine; for a remote worker set its
-            reachable hostname.
+            Name of this build runner, including the HTTP port if it is
+            not 80 — the API fetches logs and cancels jobs via
+            `http://{name}/...` verbatim, and the `connect` SSH hint is
+            printed from it. Defaults to `bindAddress`; for a remote
+            worker set a `host:port` the API host can reach.
           '';
         };
 

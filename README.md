@@ -161,7 +161,7 @@ so manifests work like upstream's NixOS VM without any imperative
 | Option | Type | Default | Meaning |
 |---|---|---|---|
 | `enable` | bool | `false` | run `builds.sr.ht-worker` plus the OCI image build unit |
-| `name` | str | `localhost` | runner name; SSH `connect` instructions reach the worker at this host |
+| `name` | str | derived from `bindAddress` | runner name **with port** — the API fetches logs/cancels jobs via `http://{name}/...`; remote workers need a reachable `host:port` |
 | `workers` | null or int | `null` | concurrent jobs (`-workers`; null = upstream default, # of CPUs) |
 | `images` | path | this repo's `images/` | dir with `control`, per-distro `functions`/`Containerfile` |
 | `buildlogs` | path | `/var/log/builds.sr.ht` | per-job build log directory |
