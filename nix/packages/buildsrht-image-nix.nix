@@ -24,6 +24,7 @@ let
     pkgs.cacert
     pkgs.openssh
     lix
+    pkgs.niks3
     pkgs.busybox
   ];
 
