@@ -1203,10 +1203,16 @@ in
           "f /var/log/git.sr.ht/git.sr.ht-update-hook.log 0644 ${cfg.git.user} ${cfg.git.group} -"
         ];
 
+        # Repo hooks symlink to this path; it must stay valid across
+        # package upgrades and store garbage collection, so route it
+        # through the system closure instead of a bare store path.
+        environment.etc."sourcehut/git.sr.ht-update-hook".source =
+          "${cfg.git.package}/bin/git.sr.ht-update-hook";
+
         services.srht.settings = {
           "git.sr.ht" = {
             repos = mkDefault "${cfg.git.repos}/";
-            post-update-script = mkDefault "${cfg.git.package}/bin/git.sr.ht-update-hook";
+            post-update-script = mkDefault "/etc/sourcehut/git.sr.ht-update-hook";
             shell = mkDefault "${cfg.git.package}/bin/git.sr.ht-shell";
             enable-dispatch = mkDefault true;
             migrate-on-upgrade = mkDefault "yes";
@@ -1274,10 +1280,20 @@ in
           description = "git.sr.ht API service";
           wantedBy = [ "multi-user.target" ];
           requires = optional config.services.postgresql.enable "postgresql.target";
-          path = [ cfg.git.gitPackage ];
+          path = [ cfg.git.gitPackage pkgs.findutils pkgs.coreutils ];
           serviceConfig = {
             User = cfg.git.user;
             Group = cfg.git.group;
+            # Hooks are installed as symlinks to post-update-script when a
+            # repository is created; existing repositories still point at an
+            # old store path after upgrades, so re-link them here.
+            ExecStartPre = pkgs.writeShellScript "fix-gitsrht-hooks" ''
+              find ${cfg.git.repos} -type d -name hooks | while read -r hooks; do
+                for name in pre-receive update post-receive post-update; do
+                  ln -sf /etc/sourcehut/git.sr.ht-update-hook "$hooks/$name"
+                done
+              done
+            '';
             ExecStart = "${cfg.git.package}/bin/git.sr.ht-api -b ${cfg.listenAddress}:${toString cfg.git.apiPort}";
             ReadWritePaths = [ cfg.git.repos ];
           };
