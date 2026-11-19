@@ -25,13 +25,13 @@
 }:
 
 let
-  version = "0.105.6";
+  version = "0.105.7";
 
   src = fetchFromSourcehut {
     owner = "~sircmpwn";
     repo = "builds.sr.ht";
     rev = version;
-    hash = "sha256-NL19GAte1JyVBj2GzFHQnKNi/TTyDJujHFJzdekq+HE=";
+    hash = "sha256-Ofhjy9oj/86LMUdakXD6Bhxb9Q6RSgej6AM+NhWh5E4=";
   };
 
   python = buildPythonPackage {
@@ -114,7 +114,7 @@ let
   go = buildGoModule {
     pname = "buildsrht-go";
     inherit version src;
-    vendorHash = "sha256-zy2N+ulMcYP9DjFoSNiBATMz3uUc4kptpHkS60aQU1g=";
+    vendorHash = "sha256-ZaxnUho3orXur7d4Ea5gQsQb+rPhhu0sQbLVa9roz5I=";
 
     nativeBuildInputs = [
       dataloaden

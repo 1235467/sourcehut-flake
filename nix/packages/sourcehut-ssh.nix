@@ -6,13 +6,13 @@
 
 buildGoModule rec {
   pname = "sourcehut-ssh";
-  version = "0.6.0";
+  version = "0.6.1";
 
   src = fetchFromSourcehut {
     owner = "~sircmpwn";
     repo = "sourcehut-ssh";
     rev = version;
-    hash = "sha256-atkMJ/g74RNGSeiv+aj2tO5snr4Lj5RgdfaD0Kgb0uw=";
+    hash = "sha256-1pU3AxyqU4eJE6LCPtMao+aKx2ncBPDUZpP9SYxGZBA=";
   };
 
   vendorHash = "sha256-pSYx7920kBdjIIFGTXWgPEVpF29pTN4zbEwxoQZ6irI=";

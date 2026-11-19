@@ -24,13 +24,13 @@
 }:
 
 let
-  version = "0.88.9";
+  version = "0.90.4";
 
   src = fetchFromSourcehut {
     owner = "~sircmpwn";
     repo = "meta.sr.ht";
     rev = version;
-    hash = "sha256-mXojiaZz3IfGM6fQ9i24aytVNqQD/oFln3zdjOgIqjI=";
+    hash = "sha256-F/zP5cvRHxIAOhN2i4735UwVuBGmA0CLjrfekLMQO4Y=";
   };
 
   python = buildPythonPackage {
@@ -106,7 +106,7 @@ let
   go = buildGoModule {
     pname = "metasrht-go";
     inherit version src;
-    vendorHash = "sha256-3T5Y9bQ3GCt4ZNc2vp39HirWMl0Sx7Lp3I9FJW4Y5Qo=";
+    vendorHash = "sha256-y2g4cmWGI/rsBgPwwLJXKpjduypVxWaaRapXAXt4v4w=";
 
     nativeBuildInputs = [
       dataloaden

@@ -14,12 +14,12 @@ Currently covered services (the only ones this flake packages):
 
 | Component | Version | Purpose |
 |---|---|---|
-| [git.sr.ht](https://git.sr.ht/~sircmpwn/git.sr.ht) | 0.102.8 | git hosting: web frontend, GraphQL API, SSH shell, HTTP clone, update hook |
-| [meta.sr.ht](https://git.sr.ht/~sircmpwn/meta.sr.ht) | 0.88.9 | accounts, authentication, SSH/PGP keys, webhook delivery |
-| [builds.sr.ht](https://git.sr.ht/~sircmpwn/builds.sr.ht) | 0.105.6 | CI: web frontend, GraphQL API, SSH shell, build worker (container backend, no KVM required) |
+| [git.sr.ht](https://git.sr.ht/~sircmpwn/git.sr.ht) | 0.102.15 | git hosting: web frontend, GraphQL API, SSH shell, HTTP clone, update hook |
+| [meta.sr.ht](https://git.sr.ht/~sircmpwn/meta.sr.ht) | 0.90.4 | accounts, authentication, SSH/PGP keys, webhook delivery |
+| [builds.sr.ht](https://git.sr.ht/~sircmpwn/builds.sr.ht) | 0.105.7 | CI: web frontend, GraphQL API, SSH shell, build worker (container backend, no KVM required) |
 | [core.sr.ht](https://git.sr.ht/~sircmpwn/core.sr.ht) | 0.84.10 | shared `srht` Python modules, assets, `sr.ht-keygen` |
 | [scm.sr.ht](https://git.sr.ht/~sircmpwn/scm.sr.ht) | 0.22.30 | shared VCS code used by git.sr.ht |
-| [sourcehut-ssh](https://git.sr.ht/~sircmpwn/sourcehut-ssh) | 0.6.0 | unified SSH dispatcher (sshd `AuthorizedKeysCommand`) |
+| [sourcehut-ssh](https://git.sr.ht/~sircmpwn/sourcehut-ssh) | 0.6.1 | unified SSH dispatcher (sshd `AuthorizedKeysCommand`) |
 | [sourcehut-migrate](https://git.sr.ht/~sircmpwn/sourcehut-migrate) | 0.3.1 | database initialization and migrations |
 
 Build-time tools that are not in nixpkgs are packaged as well:
