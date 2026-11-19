@@ -9,11 +9,16 @@
   setuptools,
   setuptools-scm,
 
+  ansi2html,
   ariadne-codegen,
   bleach,
   dataloaden,
   gqlgen,
+  httpx,
+  lxml,
   markdown,
+  markupsafe,
+  pydantic,
   pyyaml,
   redis,
   metasrht,
@@ -51,8 +56,13 @@ let
 
     dependencies = [
       srht
+      ansi2html
       bleach
+      httpx
+      lxml
       markdown
+      markupsafe
+      pydantic
       pyyaml
       redis
     ];
