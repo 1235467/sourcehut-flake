@@ -164,6 +164,7 @@ so manifests work like upstream's NixOS VM without any imperative
 | `name` | str | derived from `bindAddress` | runner name **with port** — the API fetches logs/cancels jobs via `http://{name}/...`; remote workers need a reachable `host:port` |
 | `workers` | null or int | `null` | concurrent jobs (`-workers`; null = upstream default, # of CPUs) |
 | `images` | path | this repo's `images/` | dir with `control`, per-distro `functions`/`Containerfile` |
+| `imageArchives` | list of packages | `[ buildsrht-image-nix ]` | pre-built OCI image tarballs (`dockerTools` outputs) loaded with `podman load` by the image unit |
 | `buildlogs` | path | `/var/log/builds.sr.ht` | per-job build log directory |
 | `timeout` | str | `45m` | max build duration |
 | `bindAddress` | str | `127.0.0.1:8080` | local job-info HTTP endpoint used by `builds.sr.ht-shell` |
@@ -296,8 +297,10 @@ For `builds.worker.enable = true`:
   the `builds` user, driven by the container `control` command via a
   restricted NOPASSWD sudo rule
 - `builds.sr.ht-images.service` — oneshot that builds the OCI images
-  (`podman build` per `<distro>/<release>/Containerfile`) before the worker
-  starts; disable with `builds.worker.buildImages = false` if you manage
+  (`podman build` per `<distro>/<release>/Containerfile`) and loads the
+  pre-built archives in `builds.worker.imageArchives` (`podman load`,
+  e.g. the Nix-built `buildsrht-nix` image) before the worker starts;
+  disable with `builds.worker.buildImages = false` if you manage
   images yourself
 
 Database migrations only run when a new package version ships new migration

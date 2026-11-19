@@ -21,6 +21,7 @@ tasks:
         .#buildsrht .#gitsrht .#metasrht .#srht .#scmsrht \
         .#sourcehut-ssh .#sourcehut-migrate \
         .#ariadne-codegen .#gqlgen .#dataloaden \
+        .#buildsrht-image-nix \
         --no-link --print-out-paths > /tmp/outputs.txt
       # Push the whole runtime closure so the deploy host can substitute
       # everything it needs from the cache.

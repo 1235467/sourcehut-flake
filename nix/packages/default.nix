@@ -36,6 +36,7 @@ let
   };
   sourcehut-ssh = pkgs.callPackage ./sourcehut-ssh.nix { };
   sourcehut-migrate = pkgs.callPackage ./sourcehut-migrate.nix { };
+  buildsrht-image-nix = pkgs.callPackage ./buildsrht-image-nix.nix { };
 in
 {
   inherit
@@ -49,5 +50,6 @@ in
     ariadne-codegen
     gqlgen
     dataloaden
+    buildsrht-image-nix
     ;
 }

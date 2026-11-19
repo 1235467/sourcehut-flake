@@ -259,7 +259,7 @@ on hosts without nested virtualization. Practical consequences:
   create mount/user/pid namespaces inside a guest, so the stock CppNix
   builder cannot run there at all (`unexpected EOF reading a line`,
   even with `sandbox = false`). The `nix/latest` image therefore ships
-  a patched Lix (see `images/nix/latest/lix-gvisor.patch`) whose
+  a patched Lix (see `nix/packages/lix-gvisor.patch`) whose
   non-sandbox builder avoids namespaces entirely and tolerates the
   capability syscalls runsc does not emulate; `sandbox = false` is set
   guest-wide and the runsc boundary is the real sandbox. `nix build`
@@ -269,26 +269,30 @@ on hosts without nested virtualization. Practical consequences:
   pass per-job substituters/keys to the daemon without sudo
 
 The nix image (`images/nix/latest`) is assembled differently from the
-rest: its guest package set is a `buildEnv` pinned by a committed
-`flake.nix`/`flake.lock` — `podman build` runs `nix build` inside the
-`nixos/nix` base image, so the contents are fully reproducible and nothing
-is installed imperatively with `nix-env`/`nix profile`. Flakes are enabled
-in `nix.conf`, `niks3` ships in the guest env, and the container runs a
-`nix-daemon` beside sshd so the unprivileged `build` user gets full
-`nix`/`nix-shell`/`nix-env` access, matching the upstream NixOS VM's
-manifest contract (`nix-channel`, `nix-env -iA`). Refresh the pinned
-nixpkgs by running `nix flake update` in `images/nix/latest`.
+rest: it is the `.#buildsrht-image-nix` flake package, a
+`dockerTools.buildLayeredImage` derivation built against this flake's
+own nixpkgs pin — no Containerfile, no base image, no separate guest
+flake lock. Because the guest closure (including the patched Lix) is a
+normal Nix store closure, the deploy host substitutes it from the
+binary cache instead of compiling inside `podman build`;
+`builds.sr.ht-images.service` simply `podman load`s the archive listed
+in `services.srht.builds.worker.imageArchives`. Flakes are enabled in
+`nix.conf`, and the container runs a `nix-daemon` beside sshd so the
+unprivileged `build` user gets full `nix`/`nix-shell`/`nix-env` access,
+matching the upstream NixOS VM's manifest contract (`nix-channel`,
+`nix-env -iA`). The image tag is `localhost/buildsrht-nix:latest`, which
+is what `images/nix/latest/functions` resolves `image: nix/latest` to.
 
-Note this is the `nixos/nix` base image — generic Linux with the Nix
-package manager, not a NixOS system — hence the image is named `nix`,
-not `nixos`. Manifests must use `image: nix/latest`; a true NixOS
-system image may be added later.
+Note this is generic Linux with the Nix package manager, not a NixOS
+system — hence the image is named `nix`, not `nixos`. Manifests must
+use `image: nix/latest`; a true NixOS system image may be added later.
 
 The worker runs unprivileged as the `builds` user; container lifecycle
 commands go through a NOPASSWD sudo rule that only permits the generated
 control wrapper (rootful podman). OCI images are (re)built from the
-Containerfiles by `builds.sr.ht-images.service` before the worker starts —
-the first run takes a few minutes per image; set
+Containerfiles — and archives in `imageArchives` are loaded — by
+`builds.sr.ht-images.service` before the worker starts — the first run
+takes a few minutes per image; set
 `services.srht.builds.worker.buildImages = false` to manage them yourself.
 
 The worker needs:

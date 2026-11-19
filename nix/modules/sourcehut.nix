@@ -790,6 +790,22 @@ in
           '';
         };
 
+        imageArchives = mkOption {
+          type = types.listOf types.package;
+          default = [ sourcehutPkgs.buildsrht-image-nix ];
+          defaultText = literalExpression "[ sourcehutPkgs.buildsrht-image-nix ]";
+          description = ''
+            Pre-built OCI image archives (`dockerTools` derivations)
+            loaded with `podman load` by `builds.sr.ht-images.service`,
+            alongside the Containerfile-based images from
+            {option}`services.srht.builds.worker.images`. The nix guest
+            image ships this way: being a derivation, its guest closure
+            (including the gVisor-compatible patched Lix) substitutes
+            from binary caches instead of compiling inside a podman
+            build.
+          '';
+        };
+
         buildlogs = mkOption {
           type = types.path;
           default = "/var/log/builds.sr.ht";
@@ -1544,6 +1560,14 @@ in
               tag="localhost/buildsrht-$distro:$release"
               echo "building $tag"
               podman build --build-arg RELEASE="$release" -t "$tag" -f "$cf" "$d"
+            done
+            # Pre-built image archives (e.g. the nix image is a
+            # dockerTools derivation so its guest closure substitutes
+            # from the binary cache instead of compiling in a podman
+            # build) just get loaded.
+            for img in ${lib.concatStringsSep " " cfg.builds.worker.imageArchives}; do
+              echo "loading $img"
+              podman load -i "$img"
             done
           '';
         };
