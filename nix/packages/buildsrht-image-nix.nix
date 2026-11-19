@@ -78,6 +78,14 @@ let
       UsePAM yes
       PrintMotd no
       AcceptEnv LANG LC_*
+      # OCI image Env only applies to the container's init process; sshd
+      # sessions don't inherit it, so inject the CA bundle paths (and
+      # PATH) here or in-guest git/curl can't verify TLS.
+      SetEnv PATH=/nix/var/nix/profiles/default/bin:/usr/bin:/bin:/usr/sbin:/sbin
+      SetEnv SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt
+      SetEnv GIT_SSL_CAINFO=/etc/ssl/certs/ca-bundle.crt
+      SetEnv NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt
+      SetEnv CURL_CA_BUNDLE=/etc/ssl/certs/ca-bundle.crt
       Subsystem sftp ${pkgs.openssh}/libexec/sftp-server
     '';
     nixConf = ''
@@ -163,6 +171,7 @@ pkgs.dockerTools.buildLayeredImage {
     cat ${nixbldUsers}/group >> /etc/group
 
     ln -sf ${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt /etc/ssl/certs/ca-bundle.crt
+    ln -sf ca-bundle.crt /etc/ssl/certs/ca-certificates.crt
     ln -sf ${pkgs.busybox}/bin/busybox /usr/bin/env
     ln -sf ${pkgs.bashInteractive}/bin/bash /bin/sh
     cp ${entrypoint} /entrypoint
