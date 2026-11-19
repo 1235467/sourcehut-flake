@@ -169,6 +169,7 @@ so manifests work like upstream's NixOS VM without any imperative
 | `bindAddress` | str | `127.0.0.1:8080` | local job-info HTTP endpoint used by `builds.sr.ht-shell` |
 | `podmanPackage` | package | `pkgs.podman` | podman used by the control command and image builds |
 | `runtime` | null, str or package | `null` | OCI runtime for `podman --runtime`; e.g. `pkgs.gvisor` (or a path to `runsc`) — the store path is pulled into the closure automatically, nothing to install |
+| `runtimeArgs` | list of str | `["--allow-suid"]` for runsc, `[]` otherwise | extra flags prepended to the runtime invocation; `--allow-suid` is required for setuid binaries like sudo inside gVisor guests |
 | `runAsRoot` | bool | `true` | run the control command as root via a NOPASSWD sudoers rule (rootful podman), mirroring upstream's doas/sudo model |
 | `buildImages` | bool | `true` | build the OCI images from the Containerfiles before the worker starts |
 

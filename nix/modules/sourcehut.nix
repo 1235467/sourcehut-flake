@@ -158,6 +158,10 @@ let
 
   # The images dir plus a generated config.sh pointing the control script
   # at the packaged podman and the configured OCI runtime.
+  runtimeWrapper = pkgs.writeShellScript "buildsrht-oci-runtime" ''
+    exec ${cfg.builds.worker.runtime} ${lib.escapeShellArgs cfg.builds.worker.runtimeArgs} "$@"
+  '';
+
   workerImages = pkgs.runCommand "buildsrht-worker-images" { } ''
     # -rL: materialize everything (incl. symlinked functions/Containerfiles).
     # cp -rs would leave absolute links back into the flake source store
@@ -166,9 +170,13 @@ let
     cp -rL --no-preserve=mode ${cfg.builds.worker.images}/. $out/
     # --no-preserve=mode strips the execute bit the control wrapper needs
     chmod +x $out/control
+    ${lib.optionalString (cfg.builds.worker.runtime != null)
+      # podman --runtime takes a binary path only; extra runtime flags go
+      # through a thin wrapper (e.g. runsc needs --allow-suid).
+      "install -m755 ${runtimeWrapper} $out/runtime"}
     cat > $out/config.sh <<EOF
     podman=${cfg.builds.worker.podmanPackage}/bin/podman
-    ${lib.optionalString (cfg.builds.worker.runtime != null) "runtime=${cfg.builds.worker.runtime}"}
+    ${lib.optionalString (cfg.builds.worker.runtime != null) "runtime=$out/runtime"}
     EOF
   '';
 
@@ -818,6 +826,25 @@ in
             the system closure automatically — nothing needs to be
             installed separately. Null uses podman's default runtime
             (crun).
+          '';
+        };
+
+        runtimeArgs = mkOption {
+          type = types.listOf types.str;
+          default =
+            lib.optionals
+              (cfg.builds.worker.runtime != null
+                && lib.hasSuffix "runsc" cfg.builds.worker.runtime)
+              [ "--allow-suid" ];
+          defaultText = literalExpression ''[ "--allow-suid" ] when runtime is runsc, [ ] otherwise'';
+          example = [ "--allow-suid" ];
+          description = ''
+            Extra arguments prepended to every invocation of the OCI
+            runtime. gVisor's runsc ignores SUID/SGID bits unless
+            `--allow-suid` is passed (see gVisor issue #5299); without it
+            setuid binaries such as sudo inside build guests fail with
+            "effective uid is not 0". That flag is the default whenever
+            {option}`runtime` points at runsc.
           '';
         };
 

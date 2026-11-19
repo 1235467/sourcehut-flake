@@ -252,7 +252,10 @@ on hosts without nested virtualization. Practical consequences:
   `services.srht.builds.worker.runtime = pkgs.gvisor`, which runs containers
   under gVisor's userspace kernel without needing KVM. The module embeds
   the store path into the worker configuration, so the runtime is pulled
-  into the system closure automatically — nothing needs to be installed
+  into the system closure automatically — nothing needs to be installed.
+  runsc ignores SUID/SGID bits unless `--allow-suid` is given, so the
+  module passes it via `runtimeArgs` automatically; without it in-guest
+  `sudo` fails with "effective uid is not 0"
 
 The nix image (`images/nix/latest`) is assembled differently from the
 rest: its guest package set is a `buildEnv` pinned by a committed
