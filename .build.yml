@@ -1,0 +1,25 @@
+image: nix/latest
+sources:
+  - https://git.xn--g26a.jp/~hakutaku/sourcehut-flake
+secrets:
+  - 3a765793-5184-4bc4-aadd-5b391cad8681
+  - 8fc13b74-dff8-4f28-965b-a1c066c7ae32
+tasks:
+  - cache-packages: |
+      cd sourcehut-flake
+      export NIKS3_SERVER_URL=$(cat ~/secrets/niks3-url.txt)
+      export NIKS3_AUTH_TOKEN_FILE=$HOME/secrets/niks3-token.txt
+      # sudo -> root is a trusted user, so --extra-* flags are honored.
+      # s3 is kept at a lower priority than cache.nixos.org since it
+      # bills per request.
+      sudo nix build \
+        --extra-substituters "$(cat ~/secrets/niks3-public-url.txt)?priority=50" \
+        --extra-trusted-public-keys 'my-cache-1:O2jwJZcCqgv6iMe3pBCDZuK43BSnxfUbZi6y9n7muSY=' \
+        .#buildsrht .#gitsrht .#metasrht .#srht .#scmsrht \
+        .#sourcehut-ssh .#sourcehut-migrate \
+        .#ariadne-codegen .#gqlgen .#dataloaden \
+        --no-link --print-out-paths > /tmp/outputs.txt
+      # Push the whole runtime closure so the deploy host can substitute
+      # everything it needs from the cache.
+      nix path-info --recursive $(cat /tmp/outputs.txt) > /tmp/closure.txt
+      niks3 push --stdin < /tmp/closure.txt
