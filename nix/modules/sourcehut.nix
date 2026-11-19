@@ -157,7 +157,11 @@ let
   # The images dir plus a generated config.sh pointing the control script
   # at the packaged podman and the configured OCI runtime.
   workerImages = pkgs.runCommand "buildsrht-worker-images" { } ''
-    cp -rs --no-preserve=mode ${cfg.builds.worker.images}/. $out/
+    # -rL: materialize everything (incl. symlinked functions/Containerfiles).
+    # cp -rs would leave absolute links back into the flake source store
+    # path, which buildah refuses to deref from inside a build context
+    # (COPY ... lstat: no such file or directory on the target side).
+    cp -rL --no-preserve=mode ${cfg.builds.worker.images}/. $out/
     cat > $out/config.sh <<EOF
     podman=${cfg.builds.worker.podmanPackage}/bin/podman
     ${lib.optionalString (cfg.builds.worker.runtime != null) "runtime=${cfg.builds.worker.runtime}"}
