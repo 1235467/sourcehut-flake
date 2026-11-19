@@ -1,14 +1,14 @@
-{
-  lib,
-  fetchurl,
-  buildPythonApplication,
-  click,
-  graphql-core,
-  httpx,
-  pydantic,
-  ruff,
-  toml,
-  hatchling,
+{ lib
+, fetchurl
+, buildPythonApplication
+, click
+, graphql-core
+, httpx
+, pydantic
+, ruff
+, toml
+, hatchling
+,
 }:
 
 buildPythonApplication rec {

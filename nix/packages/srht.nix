@@ -1,26 +1,25 @@
-{
-  lib,
-  fetchFromSourcehut,
-  fetchFromGitHub,
-  buildPythonPackage,
-  setuptools,
-  setuptools-scm,
-
-  beautifulsoup4,
-  celery,
-  cryptography,
-  flask,
-  humanize,
-  markdown,
-  mistletoe,
-  nh3,
-  prometheus-client,
-  psycopg2,
-  pygments,
-  redis,
-  requests,
-  sqlalchemy,
-  sqlalchemy-utils,
+{ lib
+, fetchFromSourcehut
+, fetchFromGitHub
+, buildPythonPackage
+, setuptools
+, setuptools-scm
+, beautifulsoup4
+, celery
+, cryptography
+, flask
+, humanize
+, markdown
+, mistletoe
+, nh3
+, prometheus-client
+, psycopg2
+, pygments
+, redis
+, requests
+, sqlalchemy
+, sqlalchemy-utils
+,
 }:
 
 let

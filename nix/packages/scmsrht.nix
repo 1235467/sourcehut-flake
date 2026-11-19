@@ -1,10 +1,10 @@
-{
-  lib,
-  fetchFromSourcehut,
-  buildPythonPackage,
-  setuptools,
-  setuptools-scm,
-  srht,
+{ lib
+, fetchFromSourcehut
+, buildPythonPackage
+, setuptools
+, setuptools-scm
+, srht
+,
 }:
 
 buildPythonPackage rec {

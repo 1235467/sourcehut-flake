@@ -1,27 +1,26 @@
-{
-  lib,
-  buildEnv,
-  buildGoModule,
-  buildPythonPackage,
-  fetchFromSourcehut,
-  minify,
-  sassc,
-  setuptools,
-  setuptools-scm,
-
-  ariadne-codegen,
-  bcrypt,
-  dataloaden,
-  dnspython,
-  gqlgen,
-  httpx,
-  iso3166,
-  prometheus-client,
-  pydantic,
-  qrcode,
-  redis,
-  srht,
-  zxcvbn,
+{ lib
+, buildEnv
+, buildGoModule
+, buildPythonPackage
+, fetchFromSourcehut
+, minify
+, sassc
+, setuptools
+, setuptools-scm
+, ariadne-codegen
+, bcrypt
+, dataloaden
+, dnspython
+, gqlgen
+, httpx
+, iso3166
+, prometheus-client
+, pydantic
+, qrcode
+, redis
+, srht
+, zxcvbn
+,
 }:
 
 let

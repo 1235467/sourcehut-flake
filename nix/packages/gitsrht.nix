@@ -1,22 +1,21 @@
-{
-  lib,
-  buildEnv,
-  buildGoModule,
-  buildPythonPackage,
-  fetchFromSourcehut,
-  minify,
-  sassc,
-  setuptools,
-  setuptools-scm,
-
-  ariadne-codegen,
-  dataloaden,
-  gqlgen,
-  httpx,
-  pydantic,
-  pygit2,
-  scmsrht,
-  srht,
+{ lib
+, buildEnv
+, buildGoModule
+, buildPythonPackage
+, fetchFromSourcehut
+, minify
+, sassc
+, setuptools
+, setuptools-scm
+, ariadne-codegen
+, dataloaden
+, gqlgen
+, httpx
+, pydantic
+, pygit2
+, scmsrht
+, srht
+,
 }:
 
 let

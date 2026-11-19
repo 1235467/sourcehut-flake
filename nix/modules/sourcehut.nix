@@ -1,9 +1,8 @@
-{
-  config,
-  lib,
-  options,
-  pkgs,
-  ...
+{ config
+, lib
+, options
+, pkgs
+, ...
 }:
 
 let
@@ -62,14 +61,17 @@ let
     mkKeyValue =
       k: v:
       lib.optionalString (v != null) (
-        lib.generators.mkKeyValueDefault {
-          mkValueString =
-            v:
-            if lib.isBool v then
-              (if v then "yes" else "no")
-            else
-              lib.generators.mkValueStringDefault { } v;
-        } "=" k v
+        lib.generators.mkKeyValueDefault
+          {
+            mkValueString =
+              v:
+              if lib.isBool v then
+                (if v then "yes" else "no")
+              else
+                lib.generators.mkValueStringDefault { } v;
+          } "="
+          k
+          v
       );
   };
 
@@ -1507,33 +1509,34 @@ in
 
     (mkIf (cfg.nginx.enable && (cfg.meta.enable || cfg.git.enable || cfg.builds.enable)) {
       services.nginx.virtualHosts = optionalAttrs (domain != null) (
-        optionalAttrs cfg.meta.enable {
-          "meta.${domain}" = mkMerge ([
-            {
-              forceSSL = mkDefault true;
-              enableACME = mkDefault true;
-              locations."/" = {
-                proxyPass = mkDefault "http://${cfg.listenAddress}:${toString cfg.meta.port}";
-                recommendedProxySettings = mkDefault true;
-              };
-              locations."/query" = {
-                proxyPass = mkDefault "http://${cfg.listenAddress}:${toString cfg.meta.apiPort}";
-                recommendedProxySettings = mkDefault true;
-              };
-              locations."/static" = {
-                root = mkDefault "${assets}";
-                extraConfig = ''
-                  expires 30d;
-                '';
-              };
-            }
-          ] ++ nginxVhostUserConfig);
-        }
+        optionalAttrs cfg.meta.enable
+          {
+            "meta.${domain}" = mkMerge ([
+              {
+                forceSSL = mkDefault true;
+                enableACME = mkDefault true;
+                locations."/" = {
+                  proxyPass = mkDefault "http://${cfg.listenAddress}:${toString cfg.meta.port}";
+                  recommendedProxySettings = mkDefault true;
+                };
+                locations."/query" = {
+                  proxyPass = mkDefault "http://${cfg.listenAddress}:${toString cfg.meta.apiPort}";
+                  recommendedProxySettings = mkDefault true;
+                };
+                locations."/static" = {
+                  root = mkDefault "${assets}";
+                  extraConfig = ''
+                    expires 30d;
+                  '';
+                };
+              }
+            ] ++ nginxVhostUserConfig);
+          }
         // optionalAttrs cfg.git.enable {
           "git.${domain}" = mkMerge ([
             {
               forceSSL = mkDefault true;
-            enableACME = mkDefault true;
+              enableACME = mkDefault true;
               extraConfig = ''
                 client_max_body_size 100m;
               '';

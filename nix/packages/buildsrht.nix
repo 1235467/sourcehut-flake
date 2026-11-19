@@ -1,28 +1,27 @@
-{
-  lib,
-  buildEnv,
-  buildGoModule,
-  buildPythonPackage,
-  fetchFromSourcehut,
-  minify,
-  sassc,
-  setuptools,
-  setuptools-scm,
-
-  ansi2html,
-  ariadne-codegen,
-  bleach,
-  dataloaden,
-  gqlgen,
-  httpx,
-  lxml,
-  markdown,
-  markupsafe,
-  pydantic,
-  pyyaml,
-  redis,
-  metasrht,
-  srht,
+{ lib
+, buildEnv
+, buildGoModule
+, buildPythonPackage
+, fetchFromSourcehut
+, minify
+, sassc
+, setuptools
+, setuptools-scm
+, ansi2html
+, ariadne-codegen
+, bleach
+, dataloaden
+, gqlgen
+, httpx
+, lxml
+, markdown
+, markupsafe
+, pydantic
+, pyyaml
+, redis
+, metasrht
+, srht
+,
 }:
 
 let
