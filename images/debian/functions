@@ -4,7 +4,6 @@ image="localhost/buildsrht-debian:$release"
 
 boot() {
 	_boot
-	_wait_boot "$port"
 }
 
 install() {

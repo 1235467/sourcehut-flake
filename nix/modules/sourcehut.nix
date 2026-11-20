@@ -203,6 +203,23 @@ let
     else
       "${controlWrapper}";
 
+  # The worker's job table is in-memory and guests are only ever driven
+  # over ssh by their worker process, so once this unit starts every
+  # builds_job_* container necessarily belongs to a dead job: a mid-job
+  # stop/restart/crash skips the worker's deferred `control cleanup`
+  # and orphans the guest (podman containers are detached from the
+  # unit's cgroup, so they survive the process that created them).
+  # Reaping at startup is therefore safe — a redelivered job boots a
+  # fresh container on a fresh port anyway. Rootful (runAsRoot) and
+  # rootless podman keep separate storage; cover both.
+  containerSweep = pkgs.writeShellScript "builds.sr.ht-worker-sweep" ''
+    stale=$(${cfg.builds.worker.podmanPackage}/bin/podman ps -aq --filter name=builds_job_)
+    if [ -n "$stale" ]; then
+      echo "Removing stale build containers: $stale"
+      ${cfg.builds.worker.podmanPackage}/bin/podman rm -f $stale
+    fi
+  '';
+
   # OpenSSH's safe_path rejects AuthorizedKeysCommand paths below
   # group-writable directories; /nix/store (mode 1775) is rejected, so the
   # dispatcher is invoked through a root-owned 0755 wrapper in /etc (which
@@ -1529,6 +1546,12 @@ in
             Restart = "always";
             User = cfg.builds.user;
             Group = cfg.builds.group;
+            # Reap guests orphaned by a previous worker instance
+            # (rootless storage as the service user, rootful via `+`).
+            ExecStartPre = [
+              containerSweep
+              "+${containerSweep}"
+            ];
             ExecStart =
               "${cfg.builds.package}/bin/builds.sr.ht-worker"
               + lib.optionalString (cfg.builds.worker.workers != null)
